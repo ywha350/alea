@@ -17,16 +17,20 @@ interface UiSoundOptions {
   step?: number;
 }
 
-const DICE_THROW_SOUNDS = ["/sound/dice-throw-1.ogg", "/sound/dice-throw-2.ogg", "/sound/dice-throw-3.ogg"];
-const SELECT_SOUND = "/sound/dice-select.wav";
-const ATTACK_SOUND = "/sound/damage.wav";
-const CLICK_SOUND = "/sound/heavy-click.wav";
-const PURCHASE_SOUND = "/sound/purchase.wav";
-const COIN_SOUND = "/sound/handleCoins.wav";
-const HOT_DICE_SOUND = "/sound/hot-dice.wav";
-const BOSS_DEAD_SOUND = "/sound/boss-dead.wav";
-const MARKET_OPEN_SOUND = "/sound/open-market.ogg";
-const MARKET_CLOSE_SOUND = "/sound/close-market.ogg";
+const DICE_THROW_SOUNDS = [
+  assetPath("/sound/dice-throw-1.ogg"),
+  assetPath("/sound/dice-throw-2.ogg"),
+  assetPath("/sound/dice-throw-3.ogg")
+];
+const SELECT_SOUND = assetPath("/sound/dice-select.wav");
+const ATTACK_SOUND = assetPath("/sound/damage.wav");
+const CLICK_SOUND = assetPath("/sound/heavy-click.wav");
+const PURCHASE_SOUND = assetPath("/sound/purchase.wav");
+const COIN_SOUND = assetPath("/sound/handleCoins.wav");
+const HOT_DICE_SOUND = assetPath("/sound/hot-dice.wav");
+const BOSS_DEAD_SOUND = assetPath("/sound/boss-dead.wav");
+const MARKET_OPEN_SOUND = assetPath("/sound/open-market.ogg");
+const MARKET_CLOSE_SOUND = assetPath("/sound/close-market.ogg");
 let lastSelectSoundAt = 0;
 
 function playSample(src: string, volume: number, playbackRate = 1): void {
@@ -99,3 +103,4 @@ export function playUiSound(kind: UiSoundKind, options: UiSoundOptions = {}): vo
     playSample(SELECT_SOUND, 0.34, 0.78);
   }
 }
+import { assetPath } from "./asset";

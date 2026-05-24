@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import "./index.css";
+import { assetPath } from "./game/asset";
 import { BOSSES, JOKERS, SPECIAL_DICE, TURN_LIMIT, UPGRADES } from "./game/constants";
 import { playUiSound } from "./game/audio";
 import { cloneState, makeId } from "./game/platform";
@@ -99,12 +100,12 @@ function randomDisplayDie(): number {
 
 function getDieImagePath(refId: string): string {
   if (refId === "basic") {
-    return "/dice-basic.png";
+    return assetPath("/dice-basic.png");
   }
-  return SPECIAL_DICE.find((die) => die.id === refId)?.image ?? "/dice-basic.png";
+  return SPECIAL_DICE.find((die) => die.id === refId)?.image ?? assetPath("/dice-basic.png");
 }
 
-function dieSpriteStyle(value: number, imagePath = "/dice-basic.png"): CSSProperties {
+function dieSpriteStyle(value: number, imagePath = assetPath("/dice-basic.png")): CSSProperties {
   const normalized = Math.max(1, Math.min(6, value)) - 1;
   const column = normalized % 3;
   const row = Math.floor(normalized / 3);
@@ -163,27 +164,27 @@ const BOSS_TITLES: Record<string, string> = {
 };
 
 const JOKER_IMAGE_PATHS: Partial<Record<string, string>> = {
-  triplet: "/jokers/triplets.png",
-  greedy: "/jokers/greedy.png",
-  "big-risk": "/jokers/big%20risk.png",
-  "band-aid": "/jokers/band-aid.png",
-  insurance: "/jokers/insurance.png",
-  "my-bad": "/jokers/my%20bad.png",
-  "just-one-more": "/jokers/just%20one%20more.png",
-  sparta: "/jokers/sparta.png",
-  fever: "/jokers/fever.png",
-  deal: "/jokers/deal.png",
-  discount: "/jokers/discount.png",
-  "snake-eyes": "/jokers/snake%20eyes.png",
-  "clean-sweep": "/jokers/clean%20sweep.png",
-  momentum: "/jokers/momentum.png",
-  "tax-refund": "/jokers/tax%20refund.png",
-  "pocket-change": "/jokers/pocket%20change.png",
-  "double-or-nothing": "/jokers/double%20or%20nothing.png",
-  overtime: "/jokers/overtime.png"
+  triplet: assetPath("/jokers/triplets.png"),
+  greedy: assetPath("/jokers/greedy.png"),
+  "big-risk": assetPath("/jokers/big%20risk.png"),
+  "band-aid": assetPath("/jokers/band-aid.png"),
+  insurance: assetPath("/jokers/insurance.png"),
+  "my-bad": assetPath("/jokers/my%20bad.png"),
+  "just-one-more": assetPath("/jokers/just%20one%20more.png"),
+  sparta: assetPath("/jokers/sparta.png"),
+  fever: assetPath("/jokers/fever.png"),
+  deal: assetPath("/jokers/deal.png"),
+  discount: assetPath("/jokers/discount.png"),
+  "snake-eyes": assetPath("/jokers/snake%20eyes.png"),
+  "clean-sweep": assetPath("/jokers/clean%20sweep.png"),
+  momentum: assetPath("/jokers/momentum.png"),
+  "tax-refund": assetPath("/jokers/tax%20refund.png"),
+  "pocket-change": assetPath("/jokers/pocket%20change.png"),
+  "double-or-nothing": assetPath("/jokers/double%20or%20nothing.png"),
+  overtime: assetPath("/jokers/overtime.png")
 };
 
-const DUMMY_DIE_UPGRADE_IMAGE_PATH = "/dice/die1.png";
+const DUMMY_DIE_UPGRADE_IMAGE_PATH = assetPath("/dice/die1.png");
 
 function getJokerImagePath(refId: string): string | null {
   return JOKER_IMAGE_PATHS[refId] ?? null;
@@ -209,9 +210,9 @@ function getHandUpgradeSymbol(refId: string): string {
 }
 
 const MONSTER_IDLE_BASE =
-  "/2D Pixel Dungeon Asset Pack v2.0/2D Pixel Dungeon Asset Pack/Character_animation/monsters_idle";
+  assetPath("/2D Pixel Dungeon Asset Pack v2.0/2D Pixel Dungeon Asset Pack/Character_animation/monsters_idle");
 const PRIEST_IDLE_BASE =
-  "/2D Pixel Dungeon Asset Pack v2.0/2D Pixel Dungeon Asset Pack/Character_animation/priests_idle";
+  assetPath("/2D Pixel Dungeon Asset Pack v2.0/2D Pixel Dungeon Asset Pack/Character_animation/priests_idle");
 
 const BOSS_MONSTER_IDLE: Record<string, string[]> = {
   normal: Array.from({ length: 4 }, (_, index) => `${MONSTER_IDLE_BASE}/skeleton1/v2/skeleton_v2_${index + 1}.png`),

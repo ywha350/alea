@@ -1,3 +1,4 @@
+import { assetPath } from "./asset";
 import type { BossId, JokerDefinition, SpecialDieDefinition, UpgradeDefinition } from "../types";
 
 export const TARGETS = [1000, 1500, 2200, 3200, 4700, 6800, 9500, 13000];
@@ -160,21 +161,21 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
     name: "Heavy Die",
     description: "If this die is part of a triple or better, that combo scores x1.5.",
     price: 5,
-    image: "/dice-heavy.png"
+    image: assetPath("/dice-heavy.png")
   },
   {
     id: "zombie",
     name: "Zombie Die",
     description: "If left active, prevents one Farkle, then becomes inactive.",
     price: 5,
-    image: "/dice-zombie.png"
+    image: assetPath("/dice-zombie.png")
   },
   {
     id: "bullseye",
     name: "Bull's Eye",
     description: "Single 1 score from this die is tripled.",
     price: 5,
-    image: "/dice-bullseye.png"
+    image: assetPath("/dice-bullseye.png")
   }
 ];
 
