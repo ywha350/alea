@@ -1,0 +1,17 @@
+{
+  "name": "Dungeon Alea",
+  "short_name": "Alea",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#131008",
+  "theme_color": "#2f5c3d",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

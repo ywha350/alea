@@ -1,0 +1,28 @@
+
+| Joker        | Type            | Effect                                                     |
+| ------------ | --------------- | ---------------------------------------------------------- |
+| Triplet      | Combo score     | Any triple scores  x1.5                                    |
+| Greedy       | Multiplier      | Each Roll in a turn increases turn multiplier by ×1.2, which multiplies every other score scored in the same turn.      |
+| Big Risk     | Risk multiplier | If the player rolls 4+ times before Banking, turn score ×2 |
+| Band-aid     | Defense         | First Farkle per round is ignored                          |
+| Insurance    | Defense         | On Farkle, Bank 30% of current turn score                  |
+| My bad       | Control         | Once per roll, one random non-scroing die rerolls itself   |
+
+
+| **Just One More** | 3번 이상 Roll하면 +300점             |
+| **Sparta**   | 남은 주사위가 1개일 때 점수 조합 성공하면 마지막 주사위 선택시 해당 그때까지 모은 점수 3배 |
+| **Fever**     | Hot Dice 발동 후 다음 점수 ×2  (3번까지) |
+
+Lucky Cash : Bank 점수가 1000 이상이면 +$1
+deal : turn +1
+discount : 1-2-3-4-5, 2-3-4-5-6 also counts as straights (point = same as straight)
+
+| Joker                 | Type            | Effect                                                                                                                 |
+| --------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Snake Eyes**        | Combo score     | If you score with two `1`s in one roll, gain +250 points                                                               |
+| **Clean Sweep**       | Hot Dice        | When Hot Dice triggers, gain +500 points                                                                               |
+| **Momentum**          | Scaling         | Each successful scoring roll in the same turn adds +100 bonus                                                          |
+| **Tax Refund**        | Economy         | If you Bank exactly 500 / 1000 / 1500 / 2000, gain +$1                                                                 |
+| **Pocket Change**     | Economy         | Every Bank gives +$1 if turn score is under 300                                                                        |
+| **Double or Nothing** | Risk multiplier | 첫번째 턴 스코어는 반드시x2 |
+| **Overtime**          | Turn economy    | If this is the final turn, Banked points ×1.5                                                                      |

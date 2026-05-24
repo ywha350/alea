@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dungeon Alea Palette</title>
+    <style>
+      :root {
+        --bg: #110d0a;
+        --panel: #1a120d;
+        --ink: #050505;
+        --cream: #fff0c2;
+        --muted: #b9a77d;
+        --gold: #e8b45c;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 32px;
+        color: var(--cream);
+        font-family: Georgia, "Times New Roman", serif;
+        background:
+          radial-gradient(circle at top left, rgba(232, 180, 92, 0.16), transparent 34%),
+          radial-gradient(circle at bottom right, rgba(161, 32, 22, 0.18), transparent 36%),
+          linear-gradient(180deg, #223626 0%, var(--bg) 52%, #050505 100%);
+      }
+
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+      }
+
+      header {
+        margin-bottom: 24px;
+        padding: 20px;
+        border: 4px solid var(--ink);
+        background: linear-gradient(180deg, #2b1c11 0%, var(--panel) 100%);
+        box-shadow: 6px 6px 0 var(--ink);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        color: var(--gold);
+        font-size: clamp(2rem, 6vw, 4.4rem);
+        line-height: 0.9;
+        text-shadow: 3px 3px 0 var(--ink);
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 1rem;
+      }
+
+      .palette {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 14px;
+      }
+
+      .swatch {
+        overflow: hidden;
+        border: 4px solid var(--ink);
+        background: #1a120d;
+        box-shadow: 4px 4px 0 var(--ink);
+      }
+
+      .color {
+        min-height: 104px;
+        border-bottom: 4px solid var(--ink);
+      }
+
+      .meta {
+        display: grid;
+        gap: 4px;
+        padding: 10px;
+      }
+
+      .hex {
+        color: var(--cream);
+        font-family: "Courier New", monospace;
+        font-size: 1rem;
+        font-weight: 700;
+      }
+
+      .name {
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Dungeon Alea Palette</h1>
+        <p>Pixel casino dungeon / bone dice / moss felt / ember damage colors.</p>
+      </header>
+
+      <section class="palette" aria-label="Dungeon Alea color palette">
+        <article class="swatch"><div class="color" style="background: #050505"></div><div class="meta"><span class="hex">#050505</span><span class="name">Ink Black</span></div></article>
+        <article class="swatch"><div class="color" style="background: #110d0a"></div><div class="meta"><span class="hex">#110d0a</span><span class="name">Dungeon Black</span></div></article>
+        <article class="swatch"><div class="color" style="background: #1a120d"></div><div class="meta"><span class="hex">#1a120d</span><span class="name">Charred Brown</span></div></article>
+        <article class="swatch"><div class="color" style="background: #21140b"></div><div class="meta"><span class="hex">#21140b</span><span class="name">Dice Ink</span></div></article>
+        <article class="swatch"><div class="color" style="background: #2b1c11"></div><div class="meta"><span class="hex">#2b1c11</span><span class="name">Dark Wood</span></div></article>
+        <article class="swatch"><div class="color" style="background: #3a2617"></div><div class="meta"><span class="hex">#3a2617</span><span class="name">Worn Walnut</span></div></article>
+        <article class="swatch"><div class="color" style="background: #4a301b"></div><div class="meta"><span class="hex">#4a301b</span><span class="name">Casino Oak</span></div></article>
+        <article class="swatch"><div class="color" style="background: #5a3a20"></div><div class="meta"><span class="hex">#5a3a20</span><span class="name">Burnt Bronze</span></div></article>
+        <article class="swatch"><div class="color" style="background: #6e2611"></div><div class="meta"><span class="hex">#6e2611</span><span class="name">Blood Rust</span></div></article>
+        <article class="swatch"><div class="color" style="background: #8f2d1b"></div><div class="meta"><span class="hex">#8f2d1b</span><span class="name">Ember Red</span></div></article>
+        <article class="swatch"><div class="color" style="background: #a12016"></div><div class="meta"><span class="hex">#a12016</span><span class="name">Farkle Red</span></div></article>
+        <article class="swatch"><div class="color" style="background: #d76c49"></div><div class="meta"><span class="hex">#d76c49</span><span class="name">Hit Orange</span></div></article>
+        <article class="swatch"><div class="color" style="background: #e08a3e"></div><div class="meta"><span class="hex">#e08a3e</span><span class="name">Torch Amber</span></div></article>
+        <article class="swatch"><div class="color" style="background: #e8b45c"></div><div class="meta"><span class="hex">#e8b45c</span><span class="name">Gold</span></div></article>
+        <article class="swatch"><div class="color" style="background: #f2cf82"></div><div class="meta"><span class="hex">#f2cf82</span><span class="name">Lucky Gold</span></div></article>
+        <article class="swatch"><div class="color" style="background: #fff0c2"></div><div class="meta"><span class="hex">#fff0c2</span><span class="name">Candle Cream</span></div></article>
+        <article class="swatch"><div class="color" style="background: #eee0bb"></div><div class="meta"><span class="hex">#eee0bb</span><span class="name">Bone Dice Light</span></div></article>
+        <article class="swatch"><div class="color" style="background: #d8c79f"></div><div class="meta"><span class="hex">#d8c79f</span><span class="name">Bone Dice Shadow</span></div></article>
+        <article class="swatch"><div class="color" style="background: #b9a77d"></div><div class="meta"><span class="hex">#b9a77d</span><span class="name">Aged Parchment</span></div></article>
+        <article class="swatch"><div class="color" style="background: #8f805f"></div><div class="meta"><span class="hex">#8f805f</span><span class="name">Tarnished Brass</span></div></article>
+        <article class="swatch"><div class="color" style="background: #5b6640"></div><div class="meta"><span class="hex">#5b6640</span><span class="name">Moss Olive</span></div></article>
+        <article class="swatch"><div class="color" style="background: #3f5536"></div><div class="meta"><span class="hex">#3f5536</span><span class="name">Felt Green</span></div></article>
+        <article class="swatch"><div class="color" style="background: #2e4731"></div><div class="meta"><span class="hex">#2e4731</span><span class="name">Table Green</span></div></article>
+        <article class="swatch"><div class="color" style="background: #223626"></div><div class="meta"><span class="hex">#223626</span><span class="name">Dungeon Felt</span></div></article>
+        <article class="swatch"><div class="color" style="background: #1a281c"></div><div class="meta"><span class="hex">#1a281c</span><span class="name">Deep Felt</span></div></article>
+        <article class="swatch"><div class="color" style="background: #8ec774"></div><div class="meta"><span class="hex">#8ec774</span><span class="name">Success Green</span></div></article>
+        <article class="swatch"><div class="color" style="background: #5fa35a"></div><div class="meta"><span class="hex">#5fa35a</span><span class="name">Charm Green</span></div></article>
+        <article class="swatch"><div class="color" style="background: #496b73"></div><div class="meta"><span class="hex">#496b73</span><span class="name">Cold Steel</span></div></article>
+        <article class="swatch"><div class="color" style="background: #314a55"></div><div class="meta"><span class="hex">#314a55</span><span class="name">Shadow Teal</span></div></article>
+        <article class="swatch"><div class="color" style="background: #6d7380"></div><div class="meta"><span class="hex">#6d7380</span><span class="name">Muted Silver</span></div></article>
+      </section>
+    </main>
+  </body>
+</html>
