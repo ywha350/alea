@@ -57,6 +57,7 @@ interface DiePressPulse {
 interface JokerEffect {
   key: string;
   jokerId: JokerId;
+  label?: string;
 }
 
 interface RewardPopup {
@@ -155,6 +156,7 @@ function isDiscountSmallStraight(state: SaveData): boolean {
 
 const BOSS_TITLES: Record<string, string> = {
   normal: "Bone Croupier",
+  "bone-croupier": "Bone Croupier",
   "dry-table": "Dustbone Dealer",
   "tax-collector": "Vampire Tithe",
   "broken-cup": "Cupbone Brute",
@@ -216,13 +218,18 @@ const PRIEST_IDLE_BASE =
 
 const BOSS_MONSTER_IDLE: Record<string, string[]> = {
   normal: Array.from({ length: 4 }, (_, index) => `${MONSTER_IDLE_BASE}/skeleton1/v2/skeleton_v2_${index + 1}.png`),
-  "dry-table": Array.from({ length: 4 }, (_, index) => `${MONSTER_IDLE_BASE}/skeleton1/v2/skeleton_v2_${index + 1}.png`),
+  "bone-croupier": Array.from({ length: 4 }, (_, index) => `${MONSTER_IDLE_BASE}/skeleton1/v2/skeleton_v2_${index + 1}.png`),
+  "dry-table": Array.from({ length: 4 }, (_, index) => `${MONSTER_IDLE_BASE}/skull/v2/skull_v2_${index + 1}.png`),
   "tax-collector": Array.from({ length: 4 }, (_, index) => `${MONSTER_IDLE_BASE}/vampire/v2/vampire_v2_${index + 1}.png`),
   "broken-cup": Array.from({ length: 4 }, (_, index) => `${MONSTER_IDLE_BASE}/skeleton2/v2/skeleton2_v2_${index + 1}.png`),
   "bitter-five": Array.from({ length: 4 }, (_, index) => `${PRIEST_IDLE_BASE}/priest1/v1/priest1_v1_${index + 1}.png`),
   "heavy-bones": Array.from({ length: 4 }, (_, index) => `${PRIEST_IDLE_BASE}/priest2/v1/priest2_v1_${index + 1}.png`),
   "poor-house": Array.from({ length: 4 }, (_, index) => `${PRIEST_IDLE_BASE}/priest3/v1/priest3_v1_${index + 1}.png`)
 };
+
+function getBossTone(round: number): "base" | "blue" {
+  return (round - 1) % 2 === 1 ? "blue" : "base";
+}
 
 function App() {
   const [state, setState] = useState<SaveData>(createInitialState);
@@ -280,6 +287,7 @@ function App() {
     : { name: "Dungeon Table", description: "No boss curse. Build score and strike clean." };
   const bossMonsterFrames = BOSS_MONSTER_IDLE[bossId];
   const bossMonsterImage = bossMonsterFrames[monsterIdleFrame % bossMonsterFrames.length];
+  const bossTone = getBossTone(state.run.round);
   const enemyHpRemaining = Math.max(0, state.run.targetScore - state.run.roundScore);
   const enemyHpRatio =
     state.run.targetScore <= 0 ? 0 : Math.max(0, 1 - state.run.roundScore / state.run.targetScore);
@@ -331,14 +339,14 @@ function App() {
     farkleResolving ||
     marketOpen ||
     state.run.gameOver ||
-    (state.dice.awaitingAction && !hasSelectedScore) ||
-    (state.run.currentBoss === "broken-cup" && state.dice.rollCount >= 2);
+    (state.dice.awaitingAction && !hasSelectedScore);
   const attackDisabled = isRolling || isMyBadRerollPending || farkleResolving || !attackCanBank;
   const displayedDiceValues = isRolling && rollingDiceValues.length === state.dice.values.length
     ? rollingDiceValues
     : state.dice.values;
-  const displayedTurnCount = marketOpen ? TURN_LIMIT : Math.max(0, displayTurns - 1);
-  const gameOverBestScore = Math.max(records.bestScore, state.run.roundScore);
+  const currentTurnLimit = TURN_LIMIT + (state.jokers.includes("deal") ? 1 : 0);
+  const displayedTurnCount = marketOpen ? currentTurnLimit : Math.max(0, displayTurns - 1);
+  const gameOverBestScore = Math.max(records.bestScore, state.run.totalScore);
 
   const apply = (next: SaveData, sound?: Parameters<typeof playUiSound>[0]) => {
     setState(next);
@@ -347,13 +355,13 @@ function App() {
     }
   };
 
-  const triggerJokerEffect = (jokerId: JokerId) => {
+  const triggerJokerEffect = (jokerId: JokerId, label?: string) => {
     if (!state.jokers.includes(jokerId)) {
       return;
     }
 
     const effectKey = makeId();
-    setActiveJokerEffects((current) => [...current, { key: effectKey, jokerId }]);
+    setActiveJokerEffects((current) => [...current, { key: effectKey, jokerId, label }]);
     const timeoutId = window.setTimeout(() => {
       setActiveJokerEffects((current) => current.filter((effect) => effect.key !== effectKey));
       jokerEffectTimeoutsRef.current = jokerEffectTimeoutsRef.current.filter((id) => id !== timeoutId);
@@ -370,9 +378,6 @@ function App() {
     const activeBeforeSelection = before.dice.values.filter((_, index) => !before.dice.locked[index]).length;
     const hotDiceTriggered = !before.dice.locked.every(Boolean) && after.dice.locked.every(Boolean) && after.dice.hotDice;
 
-    if (selectedValues.filter((value) => value === 1).length >= 2) {
-      triggerJokerEffect("snake-eyes");
-    }
     if (options.triggerJustOneMore !== false && before.dice.rollCount >= 3) {
       triggerJokerEffect("just-one-more");
     }
@@ -707,13 +712,13 @@ function App() {
     playUiSound("game-over");
     setRecords((current) => {
       const next = {
-        bestScore: Math.max(current.bestScore, state.run.roundScore),
-        lastScore: state.run.roundScore
+        bestScore: Math.max(current.bestScore, state.run.totalScore),
+        lastScore: state.run.totalScore
       };
       saveHomeRecords(next);
       return next;
     });
-  }, [state.run.gameOver, state.run.roundScore]);
+  }, [state.run.gameOver, state.run.totalScore]);
 
   useEffect(() => {
     const previousTarget = previousDamageTargetRef.current;
@@ -874,8 +879,9 @@ function App() {
       ) {
         pulseIndices = unlockedIndices;
       } else if (
-        (clickedValue !== 1 && clickedValue !== 5 && counts[clickedValue] >= 3) ||
-        (state.run.currentBoss === "dry-table" && clickedValue === 1 && counts[clickedValue] >= 3)
+        clickedValue !== 1 &&
+        clickedValue !== 5 &&
+        counts[clickedValue] >= 3
       ) {
         pulseIndices = unlockedIndices.filter((diceIndex) => state.dice.values[diceIndex] === clickedValue);
       }
@@ -894,6 +900,9 @@ function App() {
     const selectionChanged = next.dice.selected.some((selected, diceIndex) => selected !== state.dice.selected[diceIndex]);
     const selectedTripletStarted = !hasSelectedTriplet(state) && hasSelectedTriplet(next);
     const discountComboStarted = !isDiscountSmallStraight(state) && isDiscountSmallStraight(next);
+    const selectedSnakeEyesStarted =
+      getSelectedValues(state).filter((value) => value === 1).length < 2 &&
+      getSelectedValues(next).filter((value) => value === 1).length >= 2;
     setState(next);
     if (selectionChanged) {
       const changedCount = next.dice.selected.filter((selected, diceIndex) => selected !== state.dice.selected[diceIndex]).length;
@@ -905,11 +914,15 @@ function App() {
       if (discountComboStarted) {
         triggerJokerEffect("discount");
       }
+      if (selectedSnakeEyesStarted) {
+        triggerJokerEffect("snake-eyes");
+      }
       if (selectedMoreDice && state.flags.feverCharges > 0) {
         triggerJokerEffect("fever");
       }
       if (state.dice.rollCount > 1) {
-        triggerJokerEffect("greedy");
+        const greedyMultiplier = 1.2 ** Math.max(0, state.dice.rollCount - 1);
+        triggerJokerEffect("greedy", `x${greedyMultiplier.toFixed(2).replace(/\.?0+$/, "")}`);
       }
       if (state.run.turnNumber === 1) {
         triggerJokerEffect("double-or-nothing");
@@ -995,7 +1008,6 @@ function App() {
     const finalState = hasAnyScoringDice(activeValuesAfterReroll, rerolledState.run.currentBoss, rerolledState.jokers.includes("discount"))
       ? rerolledState
       : handleFarkle(rerolledState);
-    triggerFarkleJokerEffects(rerolledState, finalState);
 
     setState(rolledState);
     setIsRolling(false);
@@ -1013,6 +1025,7 @@ function App() {
         setRollingDiceMask([]);
         setRollingDiceValues([]);
         setState(finalState);
+        triggerFarkleJokerEffects(rerolledState, finalState);
         triggerRollCompleteEffects();
         rollTimeoutRef.current = null;
       }, ROLL_ANIMATION_MS);
@@ -1289,7 +1302,7 @@ function App() {
     <main className="shell">
       <section className="score-banner frame">
         <span className="score-label">Score</span>
-        <strong className="score-value">{formatScore(state.run.roundScore)}</strong>
+        <strong className="score-value">{formatScore(state.run.totalScore)}</strong>
         <span className="score-side">Round {state.run.round}</span>
       </section>
 
@@ -1300,7 +1313,7 @@ function App() {
       ) : (
         <section className="enemy-panel frame">
           <div
-            className={`portrait-box boss-${bossId} ${bossDyingShown || bossDeadShown ? "dead" : ""} ${bossDyingShown && !bossDeadShown ? "dying" : ""} ${healthHit ? "hit" : ""}`}
+            className={`portrait-box boss-${bossId} boss-tone-${bossTone} ${bossDyingShown || bossDeadShown ? "dead" : ""} ${bossDyingShown && !bossDeadShown ? "dying" : ""} ${healthHit ? "hit" : ""}`}
           >
             <div className="portrait-aura" />
             <img className="boss-sprite" src={bossMonsterImage} alt={BOSS_TITLES[bossId]} draggable={false} />
@@ -1379,6 +1392,7 @@ function App() {
                 aria-label={`Sell ${jokerName}`}
               >
                 {jokerImagePath ? <img className="relic-slot-joker-image" src={jokerImagePath} alt="" draggable={false} /> : null}
+                {jokerEffect?.label ? <span className="joker-effect-label">{jokerEffect.label}</span> : null}
               </button>
             ) : (
               <div
@@ -1386,6 +1400,7 @@ function App() {
                 className={slotClassName}
               >
                 {jokerImagePath ? <img className="relic-slot-joker-image" src={jokerImagePath} alt="" draggable={false} /> : null}
+                {jokerEffect?.label ? <span className="joker-effect-label">{jokerEffect.label}</span> : null}
               </div>
             );
           })}
@@ -1534,7 +1549,7 @@ function App() {
             <div className="game-over-stats">
               <article>
                 <span>Score</span>
-                <strong>{formatScore(state.run.roundScore)}</strong>
+                <strong>{formatScore(state.run.totalScore)}</strong>
               </article>
               <article>
                 <span>Best</span>

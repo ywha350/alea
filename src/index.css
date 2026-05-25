@@ -339,6 +339,10 @@ p {
   user-select: none;
 }
 
+.portrait-box.boss-tone-blue .boss-sprite {
+  filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, 0.48)) sepia(0.18) saturate(1.8) hue-rotate(170deg) brightness(1.04);
+}
+
 .portrait-box.hit .boss-sprite {
   animation: boss-damage-flash 420ms ease-out;
 }
@@ -354,11 +358,11 @@ p {
 
 @keyframes boss-damage-flash {
   0% {
-    filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, 0.48)) sepia(1) saturate(9) brightness(0.72) contrast(1.35);
+    filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, 0.48)) sepia(1) saturate(16) hue-rotate(-22deg) brightness(0.82) contrast(1.55);
   }
 
   45% {
-    filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, 0.48)) sepia(0.75) saturate(4.5) brightness(0.86) contrast(1.18);
+    filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, 0.48)) sepia(0.95) saturate(9) hue-rotate(-18deg) brightness(0.9) contrast(1.32);
   }
 
   100% {
@@ -475,7 +479,7 @@ p {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, transparent 0%, rgba(255, 243, 217, 0.68) 48%, transparent 100%);
+    linear-gradient(90deg, transparent 0%, rgba(255, 21, 21, 0.82) 48%, transparent 100%);
   animation: health-hit-flash 420ms steps(4) forwards;
   pointer-events: none;
 }
@@ -851,8 +855,7 @@ p {
   clip-path: polygon(50% 0, 100% 30%, 84% 100%, 16% 100%, 0 30%);
 }
 
-.market-item-joker-image,
-.market-item-die-image {
+.market-item-joker-image {
   align-self: center;
   justify-self: center;
   display: block;
@@ -864,6 +867,25 @@ p {
   background-position: var(--die-sprite-x, 0%) var(--die-sprite-y, 0%);
   image-rendering: pixelated;
   filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.58));
+}
+
+.market-item-die-image {
+  align-self: center;
+  justify-self: center;
+  display: block;
+  width: min(100%, 56px);
+  aspect-ratio: 1 / 1;
+  background-repeat: no-repeat;
+  background-size: 300% 200%;
+  background-position: var(--die-sprite-x, 0%) var(--die-sprite-y, 0%);
+  image-rendering: pixelated;
+  filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.58));
+}
+
+img.market-item-die-image {
+  height: auto;
+  object-fit: contain;
+  background-size: auto;
 }
 
 .market-item-hand-symbol {
@@ -1050,6 +1072,47 @@ p {
     0 0 16px rgba(232, 180, 92, 0.86);
   opacity: 0;
   animation: joker-slot-flash 500ms steps(5, end);
+}
+
+.joker-effect-label {
+  position: absolute;
+  left: 50%;
+  top: -8px;
+  z-index: 3;
+  padding: 2px 5px;
+  border: 2px solid var(--ink);
+  background: #1a120d;
+  color: var(--gold);
+  font-size: 0.68rem;
+  line-height: 1;
+  text-transform: uppercase;
+  text-shadow: 1px 1px 0 #000;
+  box-shadow: 2px 2px 0 #000;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: joker-effect-label-pop 720ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes joker-effect-label-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 6px) scale(0.78);
+  }
+
+  18% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1.08);
+  }
+
+  72% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -8px) scale(0.96);
+  }
 }
 
 @keyframes joker-pulse-glow {

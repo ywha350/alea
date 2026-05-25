@@ -81,7 +81,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "deal",
     name: "Deal",
     type: "Turn economy",
-    description: "Gain +1 turn.",
+    description: "Start each round with +1 turn.",
     price: 5
   },
   {
@@ -109,7 +109,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "momentum",
     name: "Momentum",
     type: "Scaling",
-    description: "Each successful roll adds +100.",
+    description: "Each roll adds 20% damage.",
     price: 5
   },
   {
@@ -159,31 +159,32 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
   {
     id: "heavy",
     name: "Heavy Die",
-    description: "If this die is part of a triple or better, that combo scores x1.5.",
+    description: "If it's in triple or better, x1.5.",
     price: 5,
     image: assetPath("/dice-heavy.png")
   },
   {
     id: "zombie",
     name: "Zombie Die",
-    description: "If left active, prevents one Farkle, then becomes inactive.",
+    description: "If left active, prevents one Farkle.",
     price: 5,
     image: assetPath("/dice-zombie.png")
   },
   {
     id: "bullseye",
     name: "Bull's Eye",
-    description: "Single 1 score from this die is tripled.",
+    description: "Single 1 score is tripled.",
     price: 5,
     image: assetPath("/dice-bullseye.png")
   }
 ];
 
 export const BOSSES: Record<BossId, { name: string; description: string }> = {
-  "dry-table": { name: "Dustbone Dealer", description: "Single 1s do not score." },
-  "tax-collector": { name: "Vampire Tithe", description: "Banking loses 20%." },
-  "broken-cup": { name: "Cupbone Brute", description: "Maximum 2 rolls per turn." },
-  "bitter-five": { name: "Bitter Acolyte", description: "Single 5s do not score." },
-  "heavy-bones": { name: "Iron Prior", description: "Three+ of a kind base scores are reduced by 25%." },
-  "poor-house": { name: "Vault Hierophant", description: "Round clear rewards are reduced by $2." }
+  "bone-croupier": { name: "Bone Croupier", description: "A skeletal opponent with no special rule." },
+  "dry-table": { name: "Dustbone Dealer", description: "A skull opponent with no special rule." },
+  "tax-collector": { name: "Vampire Tithe", description: "A vampire opponent with no special rule." },
+  "broken-cup": { name: "Cupbone Brute", description: "A brute opponent with no special rule." },
+  "bitter-five": { name: "Bitter Acolyte", description: "An acolyte opponent with no special rule." },
+  "heavy-bones": { name: "Iron Prior", description: "An armored opponent with no special rule." },
+  "poor-house": { name: "Vault Hierophant", description: "A vault keeper opponent with no special rule." }
 };

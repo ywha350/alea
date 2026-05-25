@@ -29,6 +29,7 @@ export type UpgradeId =
 export type SpecialDieId = "basic" | "heavy" | "zombie" | "bullseye";
 
 export type BossId =
+  | "bone-croupier"
   | "dry-table"
   | "tax-collector"
   | "broken-cup"
@@ -62,6 +63,7 @@ export interface SpecialDieDefinition {
 export interface RunState {
   round: number;
   targetScore: number;
+  totalScore: number;
   roundScore: number;
   bossKillScore: number;
   turnScore: number;
