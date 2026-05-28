@@ -17,16 +17,19 @@ export type JokerId =
   | "tax-refund"
   | "pocket-change"
   | "double-or-nothing"
-  | "overtime";
+  | "overtime"
+  | "hold-em"
+  | "gold-mine";
 
 export type UpgradeId =
   | "one-upgrade"
+  | "two-upgrade"
+  | "three-upgrade"
+  | "four-upgrade"
   | "five-upgrade"
-  | "triple-upgrade"
-  | "straight-upgrade"
-  | "three-pairs-upgrade";
+  | "six-upgrade";
 
-export type SpecialDieId = "basic" | "heavy" | "zombie" | "bullseye";
+export type SpecialDieId = "basic" | "heavy" | "zombie" | "bullseye" | "glass" | "bloody";
 
 export type BossId =
   | "bone-croupier"
@@ -90,11 +93,7 @@ export interface DiceState {
 }
 
 export interface UpgradeState {
-  singleOneBonus: number;
-  singleFiveBonus: number;
-  tripleBonus: number;
-  straightBonus: number;
-  threePairsBonus: number;
+  faceUpgradeLevels: number[];
   dieFaceBonuses: number[];
 }
 

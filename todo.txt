@@ -26,3 +26,34 @@ discount : 1-2-3-4-5, 2-3-4-5-6 also counts as straights (point = same as straig
 | **Pocket Change**     | Economy         | Every Bank gives +$1 if turn score is under 300                                                                        |
 | **Double or Nothing** | Risk multiplier | 첫번째 턴 스코어는 반드시x2 |
 | **Overtime**          | Turn economy    | If this is the final turn, Banked points ×1.5                                                                      |
+
+
+
+
+  │ Hot Streak           │ Scaling         │ Farkle 없이 연속 Bank할 때마다 다음 Bank +10%, 최대 +50%                │
+holdem : now two pair counts
+
+   5. Wild
+      - 특징 : 2,3,4,6만 등장
+      - 가격: $8
+
+  2. Glass Die
+      - 효과: 점수화되면 해당 점수 x2, 대신 점수화 후 이번 라운드 동안 비활성화.
+      - 이유: 강한 한 방과 리스크가 명확함. Zombie Die의 “비활성화” 시스템도 재사용 가능.
+      - 가격: $7
+      - 텍스쳐 : 평소에는 die-glass, 깨지면 die-glass-broken
+
+        2. 피 묻은 주사위
+      - 이 주사위가 점수화될 때마다 영구적으로 +50 강해짐.
+      - 단, Farkle이 나면 성장치 절반 손실.
+      - 느낌: 런 안에서 키우는 주사위. 애착 생김.
+
+       5. 저주받은 주사위
+      - 항상 점수화 가능한 주사위로 취급.
+      - 대신 선택하면 -100점.
+      - 이 주사위를 포함해 Hot Dice를 만들면 +1000.
+      - 느낌: 방해물인데 잘 쓰면 폭발함.
+
+
+
+stock market : 이자 두 배 

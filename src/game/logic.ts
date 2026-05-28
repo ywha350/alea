@@ -49,37 +49,45 @@ function getTurnLimit(state: SaveData): number {
   return TURN_LIMIT + (hasJoker(state, "deal") ? 1 : 0);
 }
 
-const HAND_UPGRADE_BASE_SCORES: Record<UpgradeId, number> = {
-  "one-upgrade": 100,
-  "five-upgrade": 50,
-  "triple-upgrade": 200,
-  "straight-upgrade": 1500,
-  "three-pairs-upgrade": 1500
-};
+const FACE_UPGRADE_SCALE = 1.5;
 
-function getHandUpgradeBonusField(upgrades: UpgradeState, upgradeId: UpgradeId): number {
+export function getUpgradeFace(upgradeId: UpgradeId): number {
   if (upgradeId === "one-upgrade") {
-    return upgrades.singleOneBonus;
+    return 1;
+  }
+  if (upgradeId === "two-upgrade") {
+    return 2;
+  }
+  if (upgradeId === "three-upgrade") {
+    return 3;
+  }
+  if (upgradeId === "four-upgrade") {
+    return 4;
   }
   if (upgradeId === "five-upgrade") {
-    return upgrades.singleFiveBonus;
+    return 5;
   }
-  if (upgradeId === "triple-upgrade") {
-    return upgrades.tripleBonus;
-  }
-  if (upgradeId === "straight-upgrade") {
-    return upgrades.straightBonus;
-  }
-  return upgrades.threePairsBonus;
+  return 6;
 }
 
-export function getHandUpgradeBonusAmount(upgrades: UpgradeState, upgradeId: UpgradeId): number {
-  const currentScore = HAND_UPGRADE_BASE_SCORES[upgradeId] + getHandUpgradeBonusField(upgrades, upgradeId);
-  return Math.floor(currentScore * 0.5);
+export function getFaceUpgradeLevel(upgrades: UpgradeState, upgradeId: UpgradeId): number {
+  return upgrades.faceUpgradeLevels?.[getUpgradeFace(upgradeId)] ?? 0;
+}
+
+export function getFaceUpgradeScale(upgrades: UpgradeState, upgradeId: UpgradeId): number {
+  return FACE_UPGRADE_SCALE ** getFaceUpgradeLevel(upgrades, upgradeId);
+}
+
+function getValuesUpgradeMultiplier(upgrades: UpgradeState, values: number[]): number {
+  const uniqueValues = new Set(values);
+  return [...uniqueValues].reduce((multiplier, value) => {
+    const level = upgrades.faceUpgradeLevels?.[value] ?? 0;
+    return multiplier * FACE_UPGRADE_SCALE ** level;
+  }, 1);
 }
 
 function activeValues(dice: DiceState): number[] {
-  return dice.values.filter((_, index) => !dice.locked[index]);
+  return dice.values.filter((_, index) => !dice.locked[index] && !dice.disabled[index]);
 }
 
 function countsFor(values: number[]): number[] {
@@ -102,6 +110,41 @@ function straightScore(values: number[], discount = false): number {
 function threePairsScore(values: number[]): number {
   const counts = countsFor(values).slice(1).filter(Boolean).sort((a, b) => a - b);
   return counts.length === 3 && counts.every((count) => count === 2) ? 1500 : 0;
+}
+
+function twoPairsScore(values: number[]): number {
+  const counts = countsFor(values).slice(1).filter(Boolean).sort((a, b) => a - b);
+  return counts.length === 2 && counts.every((count) => count === 2) ? 1500 : 0;
+}
+
+function hasTwoPairs(values: number[]): boolean {
+  return countsFor(values).filter((count) => count === 2).length >= 2;
+}
+
+function snakeEyesBonusScore(
+  state: SaveData,
+  selectedIndices: Array<{ value: number; index: number }>,
+  singleOneScoreAlreadyCounted: number
+): number {
+  if (!hasJoker(state, "snake-eyes")) {
+    return 0;
+  }
+
+  const oneIndices = selectedIndices.filter((die) => die.value === 1).map((die) => die.index);
+  if (oneIndices.length < 2) {
+    return 0;
+  }
+
+  const upgradeMultiplier = getValuesUpgradeMultiplier(state.upgrades, [1]);
+  if (singleOneScoreAlreadyCounted > 0) {
+    return singleOneScoreAlreadyCounted;
+  }
+
+  return Math.round(400 * upgradeMultiplier);
+}
+
+export function getGreedyMultiplier(rollCount: number): number {
+  return Math.round((1.2 ** Math.max(0, rollCount - 1)) * 10) / 10;
 }
 
 export function getTargetForRound(round: number): number {
@@ -141,7 +184,7 @@ export function createInitialState(): SaveData {
       turnScore: 0,
       turnsLeft: TURN_LIMIT,
       turnNumber: 1,
-      money: 4,
+      money: 3,
       gameOver: false,
       cleared: false,
       currentBoss: getBossForRound(1),
@@ -161,11 +204,7 @@ export function createInitialState(): SaveData {
     },
     jokers: [],
     upgrades: {
-      singleOneBonus: 0,
-      singleFiveBonus: 0,
-      tripleBonus: 0,
-      straightBonus: 0,
-      threePairsBonus: 0,
+      faceUpgradeLevels: Array(7).fill(0),
       dieFaceBonuses: Array(7).fill(0)
     },
     shop: {
@@ -198,6 +237,7 @@ export function migrateSave(save: SaveData | null): SaveData {
     upgrades: {
       ...initial.upgrades,
       ...save.upgrades,
+      faceUpgradeLevels: save.upgrades.faceUpgradeLevels ?? initial.upgrades.faceUpgradeLevels,
       dieFaceBonuses: save.upgrades.dieFaceBonuses ?? initial.upgrades.dieFaceBonuses
     },
     dice: {
@@ -225,14 +265,16 @@ export function getScoringIndices(
   values: number[],
   locked: boolean[],
   _boss: BossId | null = null,
-  discount = false
+  discount = false,
+  disabled: boolean[] = [],
+  holdEm = false
 ): Set<number> {
   const indices = new Set<number>();
-  const active = values.filter((_, index) => !locked[index]);
+  const active = values.filter((_, index) => !locked[index] && !disabled[index]);
 
   if ((active.length === 6 && (straightScore(active, discount) > 0 || threePairsScore(active) > 0)) || straightScore(active, discount) > 0) {
     values.forEach((_, index) => {
-      if (!locked[index]) {
+      if (!locked[index] && !disabled[index]) {
         indices.add(index);
       }
     });
@@ -241,18 +283,28 @@ export function getScoringIndices(
 
   const counts = countsFor(active);
   values.forEach((value, index) => {
-    if (locked[index]) {
+    if (locked[index] || disabled[index]) {
       return;
     }
     if (value === 1 || value === 5 || counts[value] >= 3) {
       indices.add(index);
     }
   });
+  if (holdEm && hasTwoPairs(active)) {
+    values.forEach((value, index) => {
+      if (!locked[index] && !disabled[index] && counts[value] === 2) {
+        indices.add(index);
+      }
+    });
+  }
   return indices;
 }
 
-export function hasAnyScoringDice(values: number[], _boss: BossId | null = null, discount = false): boolean {
+export function hasAnyScoringDice(values: number[], _boss: BossId | null = null, discount = false, holdEm = false): boolean {
   if ((values.length === 6 && (straightScore(values, discount) > 0 || threePairsScore(values) > 0)) || straightScore(values, discount) > 0) {
+    return true;
+  }
+  if (holdEm && hasTwoPairs(values)) {
     return true;
   }
 
@@ -277,17 +329,22 @@ export function calculateSelectedScore(state: SaveData, options: { includeMoment
   let score = 0;
   const labels: string[] = [];
   let flatBonus = 0;
+  let singleOneScoreAlreadyCounted = 0;
   const dieFaceBonusAppliedIndices = new Set<number>();
 
   const straight = selectedValues.length === 6 || discountStraight ? straightScore(selectedValues, discountStraight) : 0;
   const threePairs = selectedValues.length === 6 ? threePairsScore(selectedValues) : 0;
+  const twoPairs = hasJoker(state, "hold-em") && selectedValues.length === 4 ? twoPairsScore(selectedValues) : 0;
 
   if (straight > 0) {
-    score += straight + state.upgrades.straightBonus;
+    score += Math.round(straight * getValuesUpgradeMultiplier(state.upgrades, selectedValues));
     labels.push("Straight");
   } else if (threePairs > 0) {
-    score += threePairs + state.upgrades.threePairsBonus;
+    score += Math.round(threePairs * getValuesUpgradeMultiplier(state.upgrades, selectedValues));
     labels.push("Three Pairs");
+  } else if (twoPairs > 0) {
+    score += Math.round(twoPairs * getValuesUpgradeMultiplier(state.upgrades, selectedValues));
+    labels.push("Two Pairs");
   } else {
     for (let value = 1; value <= 6; value += 1) {
         const count = counts[value];
@@ -295,41 +352,42 @@ export function calculateSelectedScore(state: SaveData, options: { includeMoment
           const baseTriple = value === 1 ? 1000 : value * 100;
           const kindMultiplier = count === 3 ? 1 : count === 4 ? 2 : count === 5 ? 3 : 4;
         let kindScore = baseTriple * kindMultiplier;
-        if (count === 3 && hasJoker(state, "triplet")) {
-          kindScore = Math.round(kindScore * 1.5);
-        }
         if (selectedIndices.some((die) => die.value === value && state.dice.types[die.index] === "heavy")) {
           kindScore = Math.round(kindScore * 1.5);
         }
-        score += kindScore + state.upgrades.tripleBonus;
+        kindScore = Math.round(kindScore * getValuesUpgradeMultiplier(state.upgrades, [value]));
+        score += kindScore;
         labels.push(`${count}x${value}`);
         counts[value] -= count;
       }
     }
 
-    const singleOneScore = 100 + state.upgrades.singleOneBonus;
+    const singleOneScore = 100;
     const singleOneIndices = selectedIndices
       .filter((die) => die.value === 1)
       .slice(0, counts[1])
       .map((die) => die.index);
-    score += singleOneIndices.reduce((sum, index) => {
+    singleOneScoreAlreadyCounted = singleOneIndices.reduce((sum, index) => {
       dieFaceBonusAppliedIndices.add(index);
       const faceBonus = state.upgrades.dieFaceBonuses[1] ?? 0;
-      return sum + (singleOneScore + faceBonus) * (state.dice.types[index] === "bullseye" ? 3 : 1);
+      const bullseyeMultiplier = state.dice.types[index] === "bullseye" ? 3 : 1;
+      const upgradeMultiplier = getValuesUpgradeMultiplier(state.upgrades, [1]);
+      return sum + Math.round((singleOneScore + faceBonus) * bullseyeMultiplier * upgradeMultiplier);
     }, 0);
+    score += singleOneScoreAlreadyCounted;
     if (counts[1] > 0) {
       labels.push(`${counts[1]} one${counts[1] > 1 ? "s" : ""}`);
       counts[1] = 0;
     }
 
-    const singleFiveScore = 50 + state.upgrades.singleFiveBonus;
+    const singleFiveScore = 50;
     const singleFiveIndices = selectedIndices
       .filter((die) => die.value === 5)
       .slice(0, counts[5])
       .map((die) => die.index);
     score += singleFiveIndices.reduce((sum, index) => {
       dieFaceBonusAppliedIndices.add(index);
-      return sum + singleFiveScore + (state.upgrades.dieFaceBonuses[5] ?? 0);
+      return sum + Math.round((singleFiveScore + (state.upgrades.dieFaceBonuses[5] ?? 0)) * getValuesUpgradeMultiplier(state.upgrades, [5]));
     }, 0);
     if (counts[5] > 0) {
       labels.push(`${counts[5]} five${counts[5] > 1 ? "s" : ""}`);
@@ -342,8 +400,10 @@ export function calculateSelectedScore(state: SaveData, options: { includeMoment
   }
 
   score += flatBonus;
-  if (hasJoker(state, "snake-eyes") && selectedValues.filter((value) => value === 1).length >= 2) {
-    score += 250;
+  const snakeEyesBonus = snakeEyesBonusScore(state, selectedIndices, singleOneScoreAlreadyCounted);
+  if (snakeEyesBonus > 0) {
+    score += snakeEyesBonus;
+    labels.push("Snake Eyes");
   }
   if (hasJoker(state, "just-one-more") && state.dice.rollCount >= 3) {
     score += 300;
@@ -357,8 +417,14 @@ export function calculateSelectedScore(state: SaveData, options: { includeMoment
   );
   let multiplier = 1;
 
+  if (hasJoker(state, "triplet") && selectedValues.length === 3) {
+    multiplier *= 1.5;
+  }
+  if (selectedIndices.some((die) => state.dice.types[die.index] === "glass")) {
+    multiplier *= 2;
+  }
   if (hasJoker(state, "greedy")) {
-    multiplier *= 1.2 ** Math.max(0, state.dice.rollCount - 1);
+    multiplier *= getGreedyMultiplier(state.dice.rollCount);
   }
   if (state.flags.feverCharges > 0) {
     multiplier *= 2 ** Math.min(3, state.flags.feverCharges);
@@ -386,7 +452,7 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
     return next;
   }
 
-  const allLocked = next.dice.locked.every(Boolean);
+  const allLocked = next.dice.locked.every((locked, index) => locked || next.dice.disabled[index]);
   if (allLocked) {
     next.dice.locked.fill(false);
     next.dice.selected.fill(false);
@@ -396,14 +462,16 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
   const firstRoll = next.dice.rollCount === 0;
   next.dice.values = firstRoll
     ? randomScoringDiceValues(next.run.currentBoss, hasJoker(next, "discount"))
-    : next.dice.values.map((value, index) => (next.dice.locked[index] ? value : randomDie()));
+    : next.dice.values.map((value, index) =>
+        next.dice.locked[index] || next.dice.disabled[index] ? value : randomDie()
+      );
   next.dice.selected.fill(false);
   next.dice.rollCount += 1;
   next.dice.awaitingAction = true;
   next.updatedAt = Date.now();
 
   const active = activeValues(next.dice);
-  if (!options.deferFarkle && !hasAnyScoringDice(active, null, hasJoker(next, "discount"))) {
+  if (!options.deferFarkle && !hasAnyScoringDice(active, null, hasJoker(next, "discount"), hasJoker(next, "hold-em"))) {
     return handleFarkle(next);
   }
 
@@ -413,11 +481,18 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
 
 export function toggleDieSelection(state: SaveData, index: number): SaveData {
   const next = cloneState(state);
-  if (next.run.gameOver || next.shop.open || next.dice.rollCount <= 0 || next.dice.locked[index]) {
+  if (next.run.gameOver || next.shop.open || next.dice.rollCount <= 0 || next.dice.locked[index] || next.dice.disabled[index]) {
     return next;
   }
 
-  const scoringIndices = getScoringIndices(next.dice.values, next.dice.locked, next.run.currentBoss, hasJoker(next, "discount"));
+  const scoringIndices = getScoringIndices(
+    next.dice.values,
+    next.dice.locked,
+    next.run.currentBoss,
+    hasJoker(next, "discount"),
+    next.dice.disabled,
+    hasJoker(next, "hold-em")
+  );
   if (!scoringIndices.has(index)) {
     return next;
   }
@@ -427,16 +502,28 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
   const clickedValue = next.dice.values[index];
   const straightOnlyScore = straightScore(active, hasJoker(next, "discount")) > 0 && clickedValue !== 1 && clickedValue !== 5;
   const pairOnlyScore =
-    active.length === 6 &&
-    threePairsScore(active) > 0 &&
+    ((active.length === 6 && threePairsScore(active) > 0) || (hasJoker(next, "hold-em") && hasTwoPairs(active))) &&
     clickedValue !== 1 &&
     clickedValue !== 5 &&
     counts[clickedValue] === 2;
 
   if (straightOnlyScore || pairOnlyScore) {
-    const shouldSelect = next.dice.values.some((_, diceIndex) => !next.dice.locked[diceIndex] && !next.dice.selected[diceIndex]);
+    const pairedValues = hasJoker(next, "hold-em")
+      ? new Set(active.filter((value) => counts[value] === 2))
+      : null;
+    const shouldSelect = next.dice.values.some(
+      (value, diceIndex) =>
+        !next.dice.locked[diceIndex] &&
+        !next.dice.disabled[diceIndex] &&
+        !next.dice.selected[diceIndex] &&
+        (!pairOnlyScore || !pairedValues || pairedValues.has(value))
+    );
     next.dice.selected = next.dice.selected.map((selected, diceIndex) =>
-      next.dice.locked[diceIndex] ? selected : shouldSelect
+      next.dice.locked[diceIndex] ||
+      next.dice.disabled[diceIndex] ||
+      (pairOnlyScore && pairedValues && !pairedValues.has(next.dice.values[diceIndex]))
+        ? selected
+        : shouldSelect
     );
     return next;
   }
@@ -445,7 +532,7 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
   if (kindOnlyScore) {
     const matchingIndices = next.dice.values
       .map((value, diceIndex) => ({ value, diceIndex }))
-      .filter((die) => !next.dice.locked[die.diceIndex] && die.value === clickedValue)
+      .filter((die) => !next.dice.locked[die.diceIndex] && !next.dice.disabled[die.diceIndex] && die.value === clickedValue)
       .map((die) => die.diceIndex);
     const shouldSelect = matchingIndices.some((diceIndex) => !next.dice.selected[diceIndex]);
     matchingIndices.forEach((diceIndex) => {
@@ -467,12 +554,20 @@ export function confirmSelection(state: SaveData, options: { includeMomentum?: b
 
   const activeBeforeSelection = activeValues(next.dice).length;
   const consumedFever = next.flags.feverCharges > 0;
-  const hotDiceTriggered = next.dice.selected.every((selected, index) => selected || next.dice.locked[index]);
+  const hotDiceTriggered = next.dice.selected.every((selected, index) => selected || next.dice.locked[index] || next.dice.disabled[index]);
+  const bloodyCount = next.dice.selected.filter((selected, index) => selected && next.dice.types[index] === "bloody").length;
 
   next.run.turnScore += breakdown.score;
+  if (bloodyCount > 0) {
+    next.run.turnScore = Math.round(next.run.turnScore * 1.2 ** bloodyCount);
+  }
   next.dice.selected.forEach((selected, index) => {
     if (selected) {
-      next.dice.locked[index] = true;
+      if (next.dice.types[index] === "glass") {
+        next.dice.disabled[index] = true;
+      } else {
+        next.dice.locked[index] = true;
+      }
       next.dice.selected[index] = false;
     }
   });
@@ -490,6 +585,10 @@ export function confirmSelection(state: SaveData, options: { includeMomentum?: b
     next.log.unshift(makeLog(`${breakdown.label} scored ${breakdown.score}.`, "good"));
   }
 
+  if (bloodyCount > 0) {
+    next.log.unshift(makeLog(`Bloody Die multiplied turn damage x${(1.2 ** bloodyCount).toFixed(2)}.`, "good"));
+  }
+
   if (hasJoker(next, "sparta") && activeBeforeSelection === 1) {
     next.run.turnScore *= 3;
     next.log.unshift(makeLog("Sparta tripled the turn score.", "good"));
@@ -505,14 +604,17 @@ export function confirmSelection(state: SaveData, options: { includeMomentum?: b
 }
 
 function startNextTurn(state: SaveData, awaitingAction = false): SaveData {
+  const previousTypes = state.dice.types ?? basicDiceTypes();
+  const previousDisabled = state.dice.disabled ?? Array(6).fill(false);
+  const disabled = previousTypes.map((type, index) => type === "glass" && previousDisabled[index]);
   state.dice = {
     values: awaitingAction
       ? randomScoringDiceValues(state.run.currentBoss, hasJoker(state, "discount"))
       : randomDiceValues(),
     selected: Array(6).fill(false),
     locked: Array(6).fill(false),
-    types: state.dice.types ?? basicDiceTypes(),
-    disabled: Array(6).fill(false),
+    types: previousTypes,
+    disabled,
     rollCount: awaitingAction ? 1 : 0,
     hotDice: false,
     canRerollSingle: true,
@@ -526,12 +628,22 @@ function startNextTurn(state: SaveData, awaitingAction = false): SaveData {
 }
 
 function clearRewardBreakdown(state: SaveData, bankedAmount: number, hadFarkle: boolean): RewardBreakdownItem[] {
+  const turnBonus = Math.max(0, state.run.turnsLeft);
+  const turnReward: RewardBreakdownItem | null =
+    turnBonus > 0
+      ? {
+          id: "turns",
+          label: "turns",
+          description: `${turnBonus} turn${turnBonus === 1 ? "" : "s"} left after clearing.`,
+          amount: turnBonus
+        }
+      : null;
   const breakdown: RewardBreakdownItem[] = [
     {
       id: "base",
       label: "clear",
       description: "Base reward for beating the round.",
-      amount: 4
+      amount: 2
     }
   ];
 
@@ -552,16 +664,6 @@ function clearRewardBreakdown(state: SaveData, bankedAmount: number, hadFarkle: 
     });
   }
 
-  const turnBonus = Math.max(0, state.run.turnsLeft);
-  if (turnBonus > 0) {
-    breakdown.push({
-      id: "turns",
-      label: "turns",
-      description: `${turnBonus} turn${turnBonus === 1 ? "" : "s"} left after clearing.`,
-      amount: turnBonus
-    });
-  }
-
   const wealthBonus = Math.min(5, Math.floor(state.run.money / 5));
   if (wealthBonus > 0) {
     breakdown.push({
@@ -571,8 +673,16 @@ function clearRewardBreakdown(state: SaveData, bankedAmount: number, hadFarkle: 
       amount: wealthBonus
     });
   }
+  if (hasJoker(state, "gold-mine")) {
+    breakdown.push({
+      id: "gold-mine",
+      label: "gold mine",
+      description: "Gold Mine bonus for clearing the round.",
+      amount: 2
+    });
+  }
 
-  return breakdown;
+  return turnReward ? [turnReward, ...breakdown] : breakdown;
 }
 
 function rewardTotal(breakdown: RewardBreakdownItem[]): number {
@@ -639,7 +749,9 @@ export function handleFarkle(state: SaveData): SaveData {
 
   if (hasJoker(next, "band-aid") && !next.flags.bandAidUsedRound) {
     next.flags.bandAidUsedRound = true;
-    next.dice.values = next.dice.values.map((value, index) => (next.dice.locked[index] ? value : randomDie()));
+    next.dice.values = next.dice.values.map((value, index) =>
+      next.dice.locked[index] ? value : randomDie()
+    );
     next.dice.selected.fill(false);
     next.dice.awaitingAction = false;
     next.log.unshift(makeLog("Band-aid ignored the first Farkle this round.", "good"));
@@ -794,18 +906,8 @@ function lookupName(kind: ShopItem["kind"], refId: JokerId | UpgradeId | Special
 }
 
 function applyUpgrade(state: SaveData, upgradeId: UpgradeId): void {
-  const bonus = getHandUpgradeBonusAmount(state.upgrades, upgradeId);
-  if (upgradeId === "one-upgrade") {
-    state.upgrades.singleOneBonus += bonus;
-  } else if (upgradeId === "five-upgrade") {
-    state.upgrades.singleFiveBonus += bonus;
-  } else if (upgradeId === "triple-upgrade") {
-    state.upgrades.tripleBonus += bonus;
-  } else if (upgradeId === "straight-upgrade") {
-    state.upgrades.straightBonus += bonus;
-  } else if (upgradeId === "three-pairs-upgrade") {
-    state.upgrades.threePairsBonus += bonus;
-  }
+  const face = getUpgradeFace(upgradeId);
+  state.upgrades.faceUpgradeLevels[face] = (state.upgrades.faceUpgradeLevels[face] ?? 0) + 1;
 }
 
 export function nextRound(state: SaveData): SaveData {
@@ -830,6 +932,7 @@ export function nextRound(state: SaveData): SaveData {
   next.flags.successfulScoresThisTurn = 0;
   next.flags.hadFarkleRound = false;
   startNextTurn(next, true);
+  next.dice.disabled.fill(false);
   next.log.unshift(
     makeLog(
       next.run.currentBoss

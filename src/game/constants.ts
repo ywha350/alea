@@ -11,7 +11,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "triplet",
     name: "Triplet",
     type: "Combo score",
-    description: "Any triple scores x1.5.",
+    description: "Exactly 3 selected dice score x1.5.",
     price: 5
   },
   {
@@ -95,7 +95,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "snake-eyes",
     name: "Snake Eyes",
     type: "Combo score",
-    description: "If two 1s are in a roll, +250.",
+    description: "Two 1s score x2. On 3+ 1s, add Snake Eyes once.",
     price: 5
   },
   {
@@ -139,33 +139,43 @@ export const JOKERS: JokerDefinition[] = [
     type: "Turn economy",
     description: "On the final turn, damage x1.5.",
     price: 5
+  },
+  {
+    id: "hold-em",
+    name: "Hold'em",
+    type: "Combo rule",
+    description: "Two pairs score like Three Pairs.",
+    price: 5
+  },
+  {
+    id: "gold-mine",
+    name: "Gold Mine",
+    type: "Economy",
+    description: "Gain +$2 when clearing a round.",
+    price: 5
   }
 ];
 
 export const UPGRADES: UpgradeDefinition[] = [
-  { id: "one-upgrade", name: "One Upgrade", description: "Single 1 score x1.5 from its current value.", price: 4 },
-  { id: "five-upgrade", name: "Five Upgrade", description: "Single 5 score x1.5 from its current value.", price: 4 },
-  { id: "triple-upgrade", name: "Triple Upgrade", description: "Triple bonus x1.5 from its current value.", price: 4 },
-  { id: "straight-upgrade", name: "Straight Upgrade", description: "Straight score x1.5 from its current value.", price: 4 },
-  {
-    id: "three-pairs-upgrade",
-    name: "Three Pairs Upgrade",
-    description: "Three pairs score x1.5 from its current value.",
-    price: 4
-  }
+  { id: "one-upgrade", name: "one", description: "multiply 1.5.", price: 7 },
+  { id: "two-upgrade", name: "two", description: "multiply 1.5.", price: 2 },
+  { id: "three-upgrade", name: "three", description: "multiply 1.5.", price: 2 },
+  { id: "four-upgrade", name: "four", description: "multiply 1.5.", price: 2 },
+  { id: "five-upgrade", name: "five", description: "multiply 1.5.", price: 4 },
+  { id: "six-upgrade", name: "six", description: "multiply 1.5.", price: 3 }
 ];
 
 export const SPECIAL_DICE: SpecialDieDefinition[] = [
   {
     id: "heavy",
-    name: "Heavy Die",
+    name: "Heavy dice",
     description: "If it's in triple or better, x1.5.",
     price: 5,
     image: assetPath("/dice-heavy.png")
   },
   {
     id: "zombie",
-    name: "Zombie Die",
+    name: "Zombie",
     description: "If left active, prevents one Farkle.",
     price: 5,
     image: assetPath("/dice-zombie.png")
@@ -176,6 +186,20 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
     description: "Single 1 score is tripled.",
     price: 5,
     image: assetPath("/dice-bullseye.png")
+  },
+  {
+    id: "glass",
+    name: "Glass",
+    description: "When scored x2 the damage then breaks.",
+    price: 7,
+    image: assetPath("/dice-glass.png")
+  },
+  {
+    id: "bloody",
+    name: "Bloody",
+    description: "When scored, current turn damage x1.2.",
+    price: 6,
+    image: assetPath("/dice-red.png")
   }
 ];
 

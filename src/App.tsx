@@ -14,10 +14,13 @@ import {
   confirmSelection,
   createInitialState,
   finishFarkleTurn,
-  getHandUpgradeBonusAmount,
+  getFaceUpgradeLevel,
+  getFaceUpgradeScale,
+  getGreedyMultiplier,
   getScoringIndices,
   handleFarkle,
   hasAnyScoringDice,
+  getUpgradeFace,
   nextRound,
   rollDice,
   toggleDieSelection
@@ -37,6 +40,7 @@ const HEALTH_CLEAR_SEQUENCE_MS = 620;
 const BOSS_DEATH_SEQUENCE_MS = 620;
 const REWARD_LABEL_MS = 1060;
 const REWARD_STEP_MS = 460;
+const GAME_OVER_DELAY_MS = 500;
 
 interface HomeRecords {
   bestScore: number;
@@ -145,7 +149,7 @@ function hasSelectedTriplet(state: SaveData): boolean {
     return false;
   }
 
-  return getCounts(getSelectedValues(state)).some((count) => count === 3);
+  return getSelectedValues(state).length === 3;
 }
 
 function isDiscountSmallStraight(state: SaveData): boolean {
@@ -183,7 +187,9 @@ const JOKER_IMAGE_PATHS: Partial<Record<string, string>> = {
   "tax-refund": assetPath("/jokers/tax%20refund.png"),
   "pocket-change": assetPath("/jokers/pocket%20change.png"),
   "double-or-nothing": assetPath("/jokers/double%20or%20nothing.png"),
-  overtime: assetPath("/jokers/overtime.png")
+  overtime: assetPath("/jokers/overtime.png"),
+  "hold-em": assetPath("/jokers/hold'em.png"),
+  "gold-mine": assetPath("/jokers/gold%20mine.png")
 };
 
 const DUMMY_DIE_UPGRADE_IMAGE_PATH = assetPath("/dice/die1.png");
@@ -193,22 +199,7 @@ function getJokerImagePath(refId: string): string | null {
 }
 
 function getHandUpgradeSymbol(refId: string): string {
-  if (refId === "one-upgrade") {
-    return "1";
-  }
-  if (refId === "five-upgrade") {
-    return "5";
-  }
-  if (refId === "triple-upgrade") {
-    return "3x";
-  }
-  if (refId === "straight-upgrade") {
-    return "st";
-  }
-  if (refId === "three-pairs-upgrade") {
-    return "2p";
-  }
-  return "?";
+  return String(getUpgradeFace(refId as UpgradeId));
 }
 
 const MONSTER_IDLE_BASE =
@@ -258,6 +249,7 @@ function App() {
   const [marketGridEntering, setMarketGridEntering] = useState(false);
   const [rewardAnimationCompleteLogId, setRewardAnimationCompleteLogId] = useState<string | null>(null);
   const [monsterIdleFrame, setMonsterIdleFrame] = useState(0);
+  const [showGameOverOverlay, setShowGameOverOverlay] = useState(false);
   const recordedGameOverRef = useRef(false);
   const lastFarkleLogIdRef = useRef<string | null>(null);
   const damageDangerFarkleLogIdRef = useRef<string | null>(null);
@@ -270,6 +262,7 @@ function App() {
   const rewardAnimationLogIdRef = useRef<string | null>(null);
   const clearSequenceLogIdRef = useRef<string | null>(null);
   const rewardTimeoutsRef = useRef<number[]>([]);
+  const gameOverOverlayTimeoutRef = useRef<number | null>(null);
   const previousRoundScoreRef = useRef(state.run.roundScore);
   const lastHotDiceLogIdRef = useRef<string | null>(null);
   const lastTurnOverlayKeyRef = useRef<string | null>(null);
@@ -279,7 +272,14 @@ function App() {
   const breakdown = calculateSelectedScore(state, { includeMomentum: false });
   const scoringIndices =
     state.dice.rollCount > 0
-      ? getScoringIndices(state.dice.values, state.dice.locked, state.run.currentBoss, state.jokers.includes("discount"))
+      ? getScoringIndices(
+          state.dice.values,
+          state.dice.locked,
+          state.run.currentBoss,
+          state.jokers.includes("discount"),
+          state.dice.disabled,
+          state.jokers.includes("hold-em")
+        )
       : new Set<number>();
   const bossId: BossId | "normal" = state.run.currentBoss ?? "normal";
   const bossData = state.run.currentBoss
@@ -345,7 +345,7 @@ function App() {
     ? rollingDiceValues
     : state.dice.values;
   const currentTurnLimit = TURN_LIMIT + (state.jokers.includes("deal") ? 1 : 0);
-  const displayedTurnCount = marketOpen ? currentTurnLimit : Math.max(0, displayTurns - 1);
+  const displayedTurnCount = marketVisible ? currentTurnLimit : Math.max(0, displayTurns - 1);
   const gameOverBestScore = Math.max(records.bestScore, state.run.totalScore);
 
   const apply = (next: SaveData, sound?: Parameters<typeof playUiSound>[0]) => {
@@ -369,14 +369,22 @@ function App() {
     jokerEffectTimeoutsRef.current.push(timeoutId);
   };
 
+  const triggerBigRiskActivation = (beforeRollCount: number, after: SaveData) => {
+    if (after.jokers.includes("big-risk") && beforeRollCount < 4 && after.dice.rollCount >= 4) {
+      triggerJokerEffect("big-risk", "x2");
+    }
+  };
+
   const triggerConfirmJokerEffects = (
     before: SaveData,
     after: SaveData,
     options: { triggerJustOneMore?: boolean; triggerMomentum?: boolean } = {}
   ) => {
     const selectedValues = getSelectedValues(before);
-    const activeBeforeSelection = before.dice.values.filter((_, index) => !before.dice.locked[index]).length;
-    const hotDiceTriggered = !before.dice.locked.every(Boolean) && after.dice.locked.every(Boolean) && after.dice.hotDice;
+    const activeBeforeSelection = before.dice.values.filter((_, index) => !before.dice.locked[index] && !before.dice.disabled[index]).length;
+    const beforeAllUnavailable = before.dice.locked.every((locked, index) => locked || before.dice.disabled[index]);
+    const afterAllUnavailable = after.dice.locked.every((locked, index) => locked || after.dice.disabled[index]);
+    const hotDiceTriggered = !beforeAllUnavailable && afterAllUnavailable && after.dice.hotDice;
 
     if (options.triggerJustOneMore !== false && before.dice.rollCount >= 3) {
       triggerJokerEffect("just-one-more");
@@ -679,7 +687,7 @@ function App() {
           );
           animateMoney(from, to, 460);
           if (item.id === "turns") {
-            animateTurns(state.run.turnsLeft, Math.max(0, state.run.turnsLeft - item.amount), 460);
+            animateTurns(state.run.turnsLeft, 0, 460);
           }
           if (item.amount > 0) {
             playUiSound("coin");
@@ -701,7 +709,19 @@ function App() {
   useEffect(() => {
     if (!state.run.gameOver) {
       recordedGameOverRef.current = false;
+      setShowGameOverOverlay(false);
+      if (gameOverOverlayTimeoutRef.current !== null) {
+        window.clearTimeout(gameOverOverlayTimeoutRef.current);
+        gameOverOverlayTimeoutRef.current = null;
+      }
       return;
+    }
+
+    if (!showGameOverOverlay && gameOverOverlayTimeoutRef.current === null) {
+      gameOverOverlayTimeoutRef.current = window.setTimeout(() => {
+        setShowGameOverOverlay(true);
+        gameOverOverlayTimeoutRef.current = null;
+      }, GAME_OVER_DELAY_MS);
     }
 
     if (recordedGameOverRef.current) {
@@ -718,7 +738,7 @@ function App() {
       saveHomeRecords(next);
       return next;
     });
-  }, [state.run.gameOver, state.run.totalScore]);
+  }, [showGameOverOverlay, state.run.gameOver, state.run.totalScore]);
 
   useEffect(() => {
     const previousTarget = previousDamageTargetRef.current;
@@ -779,7 +799,9 @@ function App() {
 
     const interval = window.setInterval(() => {
       setRollingDiceValues((current) =>
-        state.dice.values.map((value, index) => (rollingDiceMask[index] ? randomDisplayDie() : current[index] ?? value))
+        state.dice.values.map((value, index) =>
+          rollingDiceMask[index] ? randomDisplayDie() : current[index] ?? value
+        )
       );
     }, ROLL_TICK_MS);
 
@@ -792,6 +814,9 @@ function App() {
     return () => {
       if (rollTimeoutRef.current !== null) {
         window.clearTimeout(rollTimeoutRef.current);
+      }
+      if (gameOverOverlayTimeoutRef.current !== null) {
+        window.clearTimeout(gameOverOverlayTimeoutRef.current);
       }
     };
   }, []);
@@ -812,7 +837,7 @@ function App() {
     });
     const rollAnimationFrame = requestAnimationFrame(() => {
       setState((current) => {
-        const rollMask = current.dice.values.map(() => true);
+        const rollMask = current.dice.values.map((_, index) => !current.dice.disabled[index]);
         const next = finishFarkleTurn(current);
 
         setRollingDiceMask(rollMask);
@@ -860,12 +885,12 @@ function App() {
     if (state.dice.selected[index]) {
       suppressNextDamageDeltaRef.current = true;
     } else if (scoringIndices.has(index)) {
-      const activeValues = state.dice.values.filter((_, diceIndex) => !state.dice.locked[diceIndex]);
+      const activeValues = state.dice.values.filter((_, diceIndex) => !state.dice.locked[diceIndex] && !state.dice.disabled[diceIndex]);
       const counts = getCounts(activeValues);
       const clickedValue = state.dice.values[index];
       const unlockedIndices = state.dice.values
         .map((_, diceIndex) => diceIndex)
-        .filter((diceIndex) => !state.dice.locked[diceIndex]);
+        .filter((diceIndex) => !state.dice.locked[diceIndex] && !state.dice.disabled[diceIndex]);
 
       let pulseIndices: number[] = [];
       if (
@@ -921,8 +946,11 @@ function App() {
         triggerJokerEffect("fever");
       }
       if (state.dice.rollCount > 1) {
-        const greedyMultiplier = 1.2 ** Math.max(0, state.dice.rollCount - 1);
-        triggerJokerEffect("greedy", `x${greedyMultiplier.toFixed(2).replace(/\.?0+$/, "")}`);
+        const greedyMultiplier = getGreedyMultiplier(state.dice.rollCount);
+        triggerJokerEffect("greedy", `x${greedyMultiplier.toFixed(1)}`);
+      }
+      if (state.dice.rollCount >= 4) {
+        triggerJokerEffect("big-risk", "x2");
       }
       if (state.run.turnNumber === 1) {
         triggerJokerEffect("double-or-nothing");
@@ -947,22 +975,33 @@ function App() {
         window.clearTimeout(rollTimeoutRef.current);
       }
 
+      const rollMask = banked.dice.values.map((_, index) => !banked.dice.disabled[index]);
       setState(banked);
-      setRollingDiceMask([]);
-      setRollingDiceValues([]);
-      setIsRolling(false);
+      setRollingDiceMask(rollMask);
+      setRollingDiceValues(banked.dice.values.map(() => randomDisplayDie()));
+      setIsRolling(true);
       playUiSound("attack");
+      playUiSound("roll");
+      rollTimeoutRef.current = window.setTimeout(() => {
+        setIsRolling(false);
+        setRollingDiceMask([]);
+        setRollingDiceValues([]);
+        rollTimeoutRef.current = null;
+      }, ROLL_ANIMATION_MS);
     }
   };
 
   const finishRollAfterAnimation = (
     rolledState: SaveData,
     rollMask: boolean[],
-    options: { triggerMomentumAfterRoll?: boolean } = {}
+    options: { triggerMomentumAfterRoll?: boolean; beforeRollCount?: number } = {}
   ) => {
     const triggerRollCompleteEffects = () => {
       if (options.triggerMomentumAfterRoll) {
         triggerJokerEffect("momentum");
+      }
+      if (options.beforeRollCount !== undefined) {
+        triggerBigRiskActivation(options.beforeRollCount, rolledState);
       }
     };
 
@@ -980,11 +1019,13 @@ function App() {
       rolledState.dice.values,
       rolledState.dice.locked,
       rolledState.run.currentBoss,
-      rolledState.jokers.includes("discount")
+      rolledState.jokers.includes("discount"),
+      rolledState.dice.disabled,
+      rolledState.jokers.includes("hold-em")
     );
     const nonScoringIndices = rolledState.dice.values
       .map((_, index) => index)
-      .filter((index) => rollMask[index] && !rolledState.dice.locked[index] && !scoringIndicesAfterRoll.has(index));
+      .filter((index) => rollMask[index] && !rolledState.dice.locked[index] && !rolledState.dice.disabled[index] && !scoringIndicesAfterRoll.has(index));
 
     if (nonScoringIndices.length === 0) {
       setIsRolling(false);
@@ -1004,8 +1045,13 @@ function App() {
     rerolledState.log.unshift({ id: makeId(), text: `My bad rerolled die ${rerollIndex + 1}.`, tone: "good" });
     rerolledState.updatedAt = Date.now();
 
-    const activeValuesAfterReroll = rerolledState.dice.values.filter((_, index) => !rerolledState.dice.locked[index]);
-    const finalState = hasAnyScoringDice(activeValuesAfterReroll, rerolledState.run.currentBoss, rerolledState.jokers.includes("discount"))
+    const activeValuesAfterReroll = rerolledState.dice.values.filter((_, index) => !rerolledState.dice.locked[index] && !rerolledState.dice.disabled[index]);
+    const finalState = hasAnyScoringDice(
+      activeValuesAfterReroll,
+      rerolledState.run.currentBoss,
+      rerolledState.jokers.includes("discount"),
+      rerolledState.jokers.includes("hold-em")
+    )
       ? rerolledState
       : handleFarkle(rerolledState);
 
@@ -1041,35 +1087,42 @@ function App() {
       const scoredState = confirmSelection(state);
       triggerConfirmJokerEffects(state, scoredState, { triggerMomentum: false });
       allowNextHotDiceOverlayRef.current = scoredState.dice.hotDice;
-      const allLocked = scoredState.dice.locked.every(Boolean);
-      const rollMask = scoredState.dice.locked.map((locked) => allLocked || !locked);
+      const allUnavailable = scoredState.dice.locked.every((locked, index) => locked || scoredState.dice.disabled[index]);
+      const rollMask = scoredState.dice.locked.map(
+        (locked, index) => !scoredState.dice.disabled[index] && (allUnavailable || !locked)
+      );
       const next = rollDice(scoredState, { deferFarkle: scoredState.jokers.includes("my-bad") });
       triggerFarkleJokerEffects(scoredState, next);
 
       setState(scoredState);
       setRollingDiceMask(rollMask);
-      setRollingDiceValues(scoredState.dice.values.map((value, index) => (rollMask[index] ? randomDisplayDie() : value)));
+      setRollingDiceValues(
+        scoredState.dice.values.map((value, index) => (rollMask[index] ? randomDisplayDie() : value))
+      );
       setIsRolling(true);
       playUiSound("click");
       playUiSound("roll");
       rollTimeoutRef.current = window.setTimeout(() => {
-        finishRollAfterAnimation(next, rollMask, { triggerMomentumAfterRoll: true });
+        finishRollAfterAnimation(next, rollMask, { triggerMomentumAfterRoll: true, beforeRollCount: scoredState.dice.rollCount });
       }, ROLL_ANIMATION_MS);
       return;
     }
 
-    const allLocked = state.dice.locked.every(Boolean);
-    const rollMask = state.dice.locked.map((locked) => allLocked || !locked);
+    const beforeRollCount = state.dice.rollCount;
+    const allUnavailable = state.dice.locked.every((locked, index) => locked || state.dice.disabled[index]);
+    const rollMask = state.dice.locked.map((locked, index) => !state.dice.disabled[index] && (allUnavailable || !locked));
     const next = rollDice(state, { deferFarkle: state.jokers.includes("my-bad") });
     triggerFarkleJokerEffects(state, next);
 
     setRollingDiceMask(rollMask);
-    setRollingDiceValues(state.dice.values.map((value, index) => (rollMask[index] ? randomDisplayDie() : value)));
+    setRollingDiceValues(
+      state.dice.values.map((value, index) => (rollMask[index] ? randomDisplayDie() : value))
+    );
     setIsRolling(true);
     playUiSound("click");
     playUiSound("roll");
     rollTimeoutRef.current = window.setTimeout(() => {
-      finishRollAfterAnimation(next, rollMask);
+      finishRollAfterAnimation(next, rollMask, { beforeRollCount });
     }, ROLL_ANIMATION_MS);
   };
 
@@ -1121,7 +1174,7 @@ function App() {
     }
     lastHotDiceLogIdRef.current = null;
     previousRoundScoreRef.current = 0;
-    setDisplayMoney(4);
+    setDisplayMoney(next.run.money);
     setDisplayTurns(next.run.turnsLeft);
     setRewardPopups([]);
     setRewardAnimationCompleteLogId(null);
@@ -1265,10 +1318,11 @@ function App() {
     }
     const upgradeId = item.refId as UpgradeId;
     const upgrade = UPGRADES.find((candidate) => candidate.id === upgradeId);
-    const bonus = getHandUpgradeBonusAmount(state.upgrades, upgradeId);
+    const level = getFaceUpgradeLevel(state.upgrades, upgradeId);
+    const currentScale = getFaceUpgradeScale(state.upgrades, upgradeId);
     return {
-      name: upgrade?.name ?? "Hand Upgrade",
-      description: `Current x1.5 adds +${bonus}.`
+      name: `LV.${level + 1} ${upgrade?.name ?? "number"}`,
+      description: `multiply 1.5.\n Current scale : x${currentScale.toFixed(1)}`
     };
   };
 
@@ -1355,7 +1409,9 @@ function App() {
         <article className="stat-box frame damage-stat">
           <span className="eyebrow">Damage</span>
           <div className="damage-stack">
-            <strong className={`damage-value ${damageDanger ? "danger" : ""}`}>{displayDamage}</strong>
+            <strong className={`damage-value ${displayDamage >= 100000 ? "compact" : ""} ${damageDanger ? "danger" : ""}`}>
+              {displayDamage}
+            </strong>
           </div>
         </article>
         <article className="stat-box frame">
@@ -1380,9 +1436,11 @@ function App() {
             const canSellJoker = marketVisible && !rewardAnimating && !marketLeaving && !pendingJokerSaleId && !!jokerId;
             const inactive =
               (jokerId === "band-aid" && state.flags.bandAidUsedRound && !state.run.cleared) ||
+              (jokerId === "big-risk" && state.dice.rollCount < 4) ||
               (jokerId === "fever" && state.flags.feverCharges <= 0) ||
               (jokerId === "overtime" && state.run.turnsLeft !== 1);
             const slotClassName = `board-slot relic-slot ${jokerId ? "filled" : "empty"} ${inactive ? "inactive" : ""} ${jokerEffect ? "joker-effect" : ""} ${salePending ? "sell-pending" : ""} ${canSellJoker ? "sellable" : ""}`;
+            const labelClassName = `joker-effect-label ${jokerId === "greedy" ? "greedy-effect-label" : ""}`;
             return canSellJoker ? (
               <button
                 key={`item-${index}-${jokerEffect?.key ?? "idle"}`}
@@ -1392,7 +1450,7 @@ function App() {
                 aria-label={`Sell ${jokerName}`}
               >
                 {jokerImagePath ? <img className="relic-slot-joker-image" src={jokerImagePath} alt="" draggable={false} /> : null}
-                {jokerEffect?.label ? <span className="joker-effect-label">{jokerEffect.label}</span> : null}
+                {jokerEffect?.label ? <span className={labelClassName}>{jokerEffect.label}</span> : null}
               </button>
             ) : (
               <div
@@ -1400,7 +1458,7 @@ function App() {
                 className={slotClassName}
               >
                 {jokerImagePath ? <img className="relic-slot-joker-image" src={jokerImagePath} alt="" draggable={false} /> : null}
-                {jokerEffect?.label ? <span className="joker-effect-label">{jokerEffect.label}</span> : null}
+                {jokerEffect?.label ? <span className={labelClassName}>{jokerEffect.label}</span> : null}
               </div>
             );
           })}
@@ -1481,6 +1539,10 @@ function App() {
             const scoring = !choosingDieUpgrade && !farkleResolving && !rolling && scoringIndices.has(index);
             const dieDeltaPopups = damageDeltaPopups.filter((popup) => popup.dieIndex === index);
             const pressing = diePressPulses.some((pulse) => pulse.dieIndex === index);
+            const dieImagePath =
+              state.dice.types[index] === "glass" && state.dice.disabled[index]
+                ? assetPath("/dice-glass-broken.png")
+                : getDieImagePath(state.dice.types[index]);
             return (
               <button
                 key={`die-${index}`}
@@ -1499,7 +1561,7 @@ function App() {
                     ))}
                   </span>
                 ) : null}
-                <span className="die-image" style={dieSpriteStyle(value, getDieImagePath(state.dice.types[index]))} aria-hidden="true" />
+                <span className="die-image" style={dieSpriteStyle(value, dieImagePath)} aria-hidden="true" />
                 <span className="die-state">
                   {disabled ? "Inactive" : locked ? "Banked" : selected ? "Chosen" : scoring ? "Live" : "Dead"}
                 </span>
@@ -1542,7 +1604,7 @@ function App() {
         )}
       </section>
 
-      {state.run.gameOver ? (
+      {showGameOverOverlay ? (
         <section className="game-over-overlay" role="dialog" aria-modal="true" aria-labelledby="game-over-title">
           <div className="game-over-card frame">
             <h2 id="game-over-title">Game Over</h2>
