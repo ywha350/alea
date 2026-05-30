@@ -199,7 +199,7 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
     name: "Bloody",
     description: "When scored, current turn damage x1.2.",
     price: 6,
-    image: assetPath("/dice-red.png")
+    image: assetPath("/dice-bloody.png")
   }
 ];
 
