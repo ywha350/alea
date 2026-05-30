@@ -1,6 +1,12 @@
-const CACHE_NAME = "dungeon-alea-v1";
+const CACHE_NAME = "dungeon-alea-v2";
 const BASE_URL = new URL(self.registration.scope).pathname;
-const APP_SHELL = [BASE_URL, `${BASE_URL}manifest.webmanifest`, `${BASE_URL}icon.svg`];
+const APP_SHELL = [
+  BASE_URL,
+  `${BASE_URL}manifest.webmanifest`,
+  `${BASE_URL}main%20icon.png`,
+  `${BASE_URL}icon-192.png`,
+  `${BASE_URL}icon-512.png`
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
