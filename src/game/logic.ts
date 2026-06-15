@@ -45,11 +45,29 @@ function hasJoker(state: SaveData, jokerId: JokerId): boolean {
   return state.jokers.includes(jokerId);
 }
 
+function tryWakeUp(state: SaveData): void {
+  const inactiveDiceCount = state.dice.disabled.filter(Boolean).length;
+  const bankedDiceCount = state.dice.locked.filter(Boolean).length;
+  if (inactiveDiceCount + bankedDiceCount > 0 && hasJoker(state, "wake-up") && Math.random() < 0.15) {
+    state.dice.disabled.fill(false);
+    state.dice.locked.fill(false);
+    state.log.unshift(makeLog(`Wake Up reactivated ${inactiveDiceCount + bankedDiceCount} dice.`, "good"));
+  }
+}
+
+function tryFaustianBargain(state: SaveData): void {
+  if (state.run.money >= 2 && hasJoker(state, "faustian-bargain") && Math.random() < 0.05) {
+    state.run.money -= 2;
+    state.run.turnsLeft += 1;
+    state.log.unshift(makeLog("Faustian Bargain spent $2 and gained +1 turn.", "good"));
+  }
+}
+
 function getTurnLimit(state: SaveData): number {
   return TURN_LIMIT + (hasJoker(state, "deal") ? 1 : 0);
 }
 
-const FACE_UPGRADE_SCALE = 1.5;
+const FACE_UPGRADE_SCALE = 2;
 
 export function getUpgradeFace(upgradeId: UpgradeId): number {
   if (upgradeId === "one-upgrade") {
@@ -112,9 +130,9 @@ function threePairsScore(values: number[]): number {
   return counts.length === 3 && counts.every((count) => count === 2) ? 1500 : 0;
 }
 
-function twoPairsScore(values: number[]): number {
+function fullHouseScore(values: number[]): number {
   const counts = countsFor(values).slice(1).filter(Boolean).sort((a, b) => a - b);
-  return counts.length === 2 && counts.every((count) => count === 2) ? 1500 : 0;
+  return counts.length === 2 && counts[0] === 2 && counts[1] === 3 ? 1500 : 0;
 }
 
 function hasTwoPairs(values: number[]): boolean {
@@ -137,10 +155,10 @@ function snakeEyesBonusScore(
 
   const upgradeMultiplier = getValuesUpgradeMultiplier(state.upgrades, [1]);
   if (singleOneScoreAlreadyCounted > 0) {
-    return singleOneScoreAlreadyCounted;
+    return singleOneScoreAlreadyCounted * 3;
   }
 
-  return Math.round(400 * upgradeMultiplier);
+  return Math.round(1200 * upgradeMultiplier);
 }
 
 export function getGreedyMultiplier(rollCount: number): number {
@@ -169,8 +187,19 @@ export function getBossForRound(round: number): BossId | null {
   return bossCycle[Math.floor((round - 1) / 2) % bossCycle.length];
 }
 
+function randomBossDescriptionIndex(boss: BossId | null): number {
+  return boss ? Math.floor(Math.random() * BOSSES[boss].descriptions.length) : 0;
+}
+
+function validBossDescriptionIndex(boss: BossId | null, index: number | undefined): number {
+  return boss && Number.isInteger(index) && index !== undefined && index >= 0 && index < BOSSES[boss].descriptions.length
+    ? index
+    : randomBossDescriptionIndex(boss);
+}
+
 export function createInitialState(): SaveData {
   const now = Date.now();
+  const currentBoss = getBossForRound(1);
   return {
     version: SAVE_VERSION,
     createdAt: now,
@@ -187,11 +216,12 @@ export function createInitialState(): SaveData {
       money: 3,
       gameOver: false,
       cleared: false,
-      currentBoss: getBossForRound(1),
+      currentBoss,
+      bossDescriptionIndex: randomBossDescriptionIndex(currentBoss),
       lastRewardBreakdown: []
     },
     dice: {
-      values: randomScoringDiceValues(getBossForRound(1), false),
+      values: randomScoringDiceValues(currentBoss, false),
       types: basicDiceTypes(),
       disabled: Array(6).fill(false),
       selected: Array(6).fill(false),
@@ -231,6 +261,7 @@ export function migrateSave(save: SaveData | null): SaveData {
   }
 
   const initial = createInitialState();
+  const currentBoss = save.run.currentBoss ?? initial.run.currentBoss;
   return {
     ...createInitialState(),
     ...save,
@@ -250,6 +281,7 @@ export function migrateSave(save: SaveData | null): SaveData {
       ...initial.run,
       ...save.run,
       totalScore: save.run.totalScore ?? save.run.roundScore ?? initial.run.totalScore,
+      bossDescriptionIndex: validBossDescriptionIndex(currentBoss, save.run.bossDescriptionIndex),
       lastRewardBreakdown: save.run.lastRewardBreakdown ?? initial.run.lastRewardBreakdown
     },
     flags: {
@@ -272,7 +304,11 @@ export function getScoringIndices(
   const indices = new Set<number>();
   const active = values.filter((_, index) => !locked[index] && !disabled[index]);
 
-  if ((active.length === 6 && (straightScore(active, discount) > 0 || threePairsScore(active) > 0)) || straightScore(active, discount) > 0) {
+  if (
+    (active.length === 6 && (straightScore(active, discount) > 0 || threePairsScore(active) > 0)) ||
+    straightScore(active, discount) > 0 ||
+    (holdEm && active.length === 5 && fullHouseScore(active) > 0)
+  ) {
     values.forEach((_, index) => {
       if (!locked[index] && !disabled[index]) {
         indices.add(index);
@@ -301,7 +337,11 @@ export function getScoringIndices(
 }
 
 export function hasAnyScoringDice(values: number[], _boss: BossId | null = null, discount = false, holdEm = false): boolean {
-  if ((values.length === 6 && (straightScore(values, discount) > 0 || threePairsScore(values) > 0)) || straightScore(values, discount) > 0) {
+  if (
+    (values.length === 6 && (straightScore(values, discount) > 0 || threePairsScore(values) > 0)) ||
+    straightScore(values, discount) > 0 ||
+    (holdEm && values.length === 5 && fullHouseScore(values) > 0)
+  ) {
     return true;
   }
   if (holdEm && hasTwoPairs(values)) {
@@ -334,7 +374,10 @@ export function calculateSelectedScore(state: SaveData, options: { includeMoment
 
   const straight = selectedValues.length === 6 || discountStraight ? straightScore(selectedValues, discountStraight) : 0;
   const threePairs = selectedValues.length === 6 ? threePairsScore(selectedValues) : 0;
-  const twoPairs = hasJoker(state, "hold-em") && selectedValues.length === 4 ? twoPairsScore(selectedValues) : 0;
+  const fullHouse = hasJoker(state, "hold-em") && selectedValues.length === 5 ? fullHouseScore(selectedValues) : 0;
+  const twoPairValues = hasJoker(state, "hold-em")
+    ? counts.map((count, value) => ({ count, value })).filter(({ count }) => count === 2).map(({ value }) => value)
+    : [];
 
   if (straight > 0) {
     score += Math.round(straight * getValuesUpgradeMultiplier(state.upgrades, selectedValues));
@@ -342,10 +385,18 @@ export function calculateSelectedScore(state: SaveData, options: { includeMoment
   } else if (threePairs > 0) {
     score += Math.round(threePairs * getValuesUpgradeMultiplier(state.upgrades, selectedValues));
     labels.push("Three Pairs");
-  } else if (twoPairs > 0) {
-    score += Math.round(twoPairs * getValuesUpgradeMultiplier(state.upgrades, selectedValues));
-    labels.push("Two Pairs");
+  } else if (fullHouse > 0) {
+    score += Math.round(fullHouse * getValuesUpgradeMultiplier(state.upgrades, selectedValues));
+    labels.push("Full House");
   } else {
+    if (twoPairValues.length === 2) {
+      score += Math.round(800 * getValuesUpgradeMultiplier(state.upgrades, twoPairValues));
+      labels.push("Two Pairs");
+      twoPairValues.forEach((value) => {
+        counts[value] = 0;
+      });
+    }
+
     for (let value = 1; value <= 6; value += 1) {
         const count = counts[value];
         if (count >= 3) {
@@ -353,7 +404,7 @@ export function calculateSelectedScore(state: SaveData, options: { includeMoment
           const kindMultiplier = count === 3 ? 1 : count === 4 ? 2 : count === 5 ? 3 : 4;
         let kindScore = baseTriple * kindMultiplier;
         if (selectedIndices.some((die) => die.value === value && state.dice.types[die.index] === "heavy")) {
-          kindScore = Math.round(kindScore * 1.5);
+          kindScore = Math.round(kindScore * 2);
         }
         kindScore = Math.round(kindScore * getValuesUpgradeMultiplier(state.upgrades, [value]));
         score += kindScore;
@@ -409,7 +460,7 @@ export function calculateSelectedScore(state: SaveData, options: { includeMoment
     score += 300;
   }
   if (options.includeMomentum !== false && hasJoker(state, "momentum")) {
-    score += Math.round(state.run.turnScore * 0.2);
+    score += Math.round(score * state.dice.rollCount * 0.2);
   }
   score += selectedIndices.reduce(
     (sum, die) => sum + (dieFaceBonusAppliedIndices.has(die.index) ? 0 : state.upgrades.dieFaceBonuses[die.value] ?? 0),
@@ -421,7 +472,7 @@ export function calculateSelectedScore(state: SaveData, options: { includeMoment
     multiplier *= 1.5;
   }
   if (selectedIndices.some((die) => state.dice.types[die.index] === "glass")) {
-    multiplier *= 2;
+    multiplier *= 5;
   }
   if (hasJoker(state, "greedy")) {
     multiplier *= getGreedyMultiplier(state.dice.rollCount);
@@ -451,6 +502,9 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
   if (next.run.gameOver || next.shop.open) {
     return next;
   }
+
+  tryWakeUp(next);
+  tryFaustianBargain(next);
 
   const allLocked = next.dice.locked.every((locked, index) => locked || next.dice.disabled[index]);
   if (allLocked) {
@@ -500,28 +554,27 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
   const active = activeValues(next.dice);
   const counts = countsFor(active);
   const clickedValue = next.dice.values[index];
-  const straightOnlyScore = straightScore(active, hasJoker(next, "discount")) > 0 && clickedValue !== 1 && clickedValue !== 5;
+  const wholeHandScore =
+    straightScore(active, hasJoker(next, "discount")) > 0 ||
+    (hasJoker(next, "hold-em") && active.length === 5 && fullHouseScore(active) > 0);
   const pairOnlyScore =
     ((active.length === 6 && threePairsScore(active) > 0) || (hasJoker(next, "hold-em") && hasTwoPairs(active))) &&
     clickedValue !== 1 &&
     clickedValue !== 5 &&
     counts[clickedValue] === 2;
 
-  if (straightOnlyScore || pairOnlyScore) {
-    const pairedValues = hasJoker(next, "hold-em")
-      ? new Set(active.filter((value) => counts[value] === 2))
-      : null;
+  if (wholeHandScore || pairOnlyScore) {
     const shouldSelect = next.dice.values.some(
       (value, diceIndex) =>
         !next.dice.locked[diceIndex] &&
         !next.dice.disabled[diceIndex] &&
         !next.dice.selected[diceIndex] &&
-        (!pairOnlyScore || !pairedValues || pairedValues.has(value))
+        (!pairOnlyScore || counts[value] === 2)
     );
     next.dice.selected = next.dice.selected.map((selected, diceIndex) =>
       next.dice.locked[diceIndex] ||
       next.dice.disabled[diceIndex] ||
-      (pairOnlyScore && pairedValues && !pairedValues.has(next.dice.values[diceIndex]))
+      (pairOnlyScore && counts[next.dice.values[diceIndex]] !== 2)
         ? selected
         : shouldSelect
     );
@@ -577,7 +630,8 @@ export function confirmSelection(state: SaveData, options: { includeMomentum?: b
       next.flags.feverCharges = Math.min(3, next.flags.feverCharges + 1);
     }
     if (hasJoker(next, "clean-sweep")) {
-      next.run.turnScore += 500;
+      next.run.money += 2;
+      next.log.unshift(makeLog("Clean Sweep gained $2.", "good"));
     }
     next.dice.hotDice = true;
     next.log.unshift(makeLog(`Hot Dice. ${breakdown.label} scored ${breakdown.score}.`, "good"));
@@ -666,17 +720,18 @@ function clearRewardBreakdown(state: SaveData, bankedAmount: number, hadFarkle: 
 
   const wealthBonus = Math.min(5, Math.floor(state.run.money / 5));
   if (wealthBonus > 0) {
+    const interestMultiplier = hasJoker(state, "investment") ? 2 : 1;
     breakdown.push({
       id: "interest",
       label: "stash",
-      description: "Bonus from money already held, capped at $5.",
-      amount: wealthBonus
+      description: `Bonus from money already held${interestMultiplier > 1 ? ", doubled by Investment" : ""}.`,
+      amount: wealthBonus * interestMultiplier
     });
   }
   if (hasJoker(state, "gold-mine")) {
     breakdown.push({
       id: "gold-mine",
-      label: "gold mine",
+      label: "gold",
       description: "Gold Mine bonus for clearing the round.",
       amount: 2
     });
@@ -760,7 +815,7 @@ export function handleFarkle(state: SaveData): SaveData {
   }
 
   if (hasJoker(next, "insurance") && next.run.turnScore > 0) {
-    const insured = Math.floor(next.run.turnScore * 0.3);
+    const insured = Math.floor(next.run.turnScore * 0.5);
     next.run.roundScore += insured;
     next.run.totalScore += insured;
     next.log.unshift(makeLog(`Insurance banked ${insured}.`, "good"));
@@ -800,7 +855,7 @@ export function finishFarkleTurn(state: SaveData): SaveData {
 }
 
 export function generateShop(state: SaveData): ShopItem[] {
-  const unavailableJokers = new Set<JokerId>(["lucky-cash", "tax-refund"]);
+  const unavailableJokers = new Set<JokerId>(["lucky-cash", "tax-refund", "just-one-more"]);
   const availableJokers = JOKERS.filter((joker) => !unavailableJokers.has(joker.id) && !state.jokers.includes(joker.id));
   const shuffledJokers = [...availableJokers].sort(() => Math.random() - 0.5).slice(0, 2);
   const handUpgrades = [...UPGRADES].sort(() => Math.random() - 0.5).slice(0, 2);
@@ -925,14 +980,15 @@ export function nextRound(state: SaveData): SaveData {
   next.run.cleared = false;
   next.run.lastRewardBreakdown = [];
   next.run.currentBoss = getBossForRound(next.run.round);
+  next.run.bossDescriptionIndex = randomBossDescriptionIndex(next.run.currentBoss);
   next.shop.open = false;
   next.shop.items = [];
   next.flags.bandAidUsedRound = false;
   next.flags.feverCharges = 0;
   next.flags.successfulScoresThisTurn = 0;
   next.flags.hadFarkleRound = false;
-  startNextTurn(next, true);
   next.dice.disabled.fill(false);
+  startNextTurn(next, true);
   next.log.unshift(
     makeLog(
       next.run.currentBoss

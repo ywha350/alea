@@ -19,7 +19,10 @@ export type JokerId =
   | "double-or-nothing"
   | "overtime"
   | "hold-em"
-  | "gold-mine";
+  | "gold-mine"
+  | "investment"
+  | "wake-up"
+  | "faustian-bargain";
 
 export type UpgradeId =
   | "one-upgrade"
@@ -76,6 +79,7 @@ export interface RunState {
   gameOver: boolean;
   cleared: boolean;
   currentBoss: BossId | null;
+  bossDescriptionIndex: number;
   lastRewardBreakdown: RewardBreakdownItem[];
 }
 
