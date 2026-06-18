@@ -11,7 +11,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "triplet",
     name: "Triplet",
     type: "Combo score",
-    description: "Exactly 3 selected dice score x1.5.",
+    description: "Exactly 3 selected dice score x2.",
     price: 5
   },
   {
@@ -123,7 +123,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "pocket-change",
     name: "Pocket Change",
     type: "Economy",
-    description: "Every damage under 300 gives +$1.",
+    description: "Bank after 3 or fewer rolls to gain +$1.",
     price: 5
   },
   {
@@ -162,17 +162,31 @@ export const JOKERS: JokerDefinition[] = [
     price: 5
   },
   {
+    id: "golden-ratio",
+    name: "Golden Ratio",
+    type: "Multiplier",
+    description: "All scoring x1.6.",
+    price: 5
+  },
+  {
+    id: "the-portrait",
+    name: "The Portrait",
+    type: "Copy",
+    description: "Copies one owned Joker each round.",
+    price: 5
+  },
+  {
     id: "wake-up",
     name: "Wake Up",
     type: "Recovery",
-    description: "15% chance to reactivate all inactive and Banked dice.",
+    description: "15% chance to reactivate all dice.",
     price: 5
   },
   {
     id: "faustian-bargain",
     name: "Bargain",
     type: "Turn economy",
-    description: "5% chance to spend $2 and gain +1 turn.",
+    description: "7% chance to spend $1 and gain +1 turn.",
     price: 5
   }
 ];
@@ -197,7 +211,7 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
   {
     id: "zombie",
     name: "Zombie",
-    description: "If left active, prevents one Farkle.",
+    description: "Prevents one Farkle.",
     price: 5,
     image: assetPath("/dice-zombie.png")
   },
@@ -218,7 +232,7 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
   {
     id: "bloody",
     name: "Bloody",
-    description: "When scored, current turn damage x1.2.",
+    description: "When scored x1.2 turn damage.",
     price: 6,
     image: assetPath("/dice-bloody.png")
   }

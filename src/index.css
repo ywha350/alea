@@ -1204,6 +1204,27 @@ img.market-item-die-image {
   filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.58));
 }
 
+.portrait-joker-stack {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.portrait-joker-stack .relic-slot-joker-image {
+  position: absolute;
+  inset: 0;
+}
+
+.portrait-copied-joker-image {
+  opacity: 0.8;
+  filter: brightness(0.8) drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.58));
+}
+
+.portrait-frame-joker-image {
+  z-index: 1;
+}
+
 .joker-sale-confirm {
   position: absolute;
   inset: auto 10px 10px;

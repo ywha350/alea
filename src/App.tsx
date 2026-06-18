@@ -17,6 +17,7 @@ import {
   getFaceUpgradeLevel,
   getFaceUpgradeScale,
   getGreedyMultiplier,
+  getJokerCount,
   getScoringIndices,
   handleFarkle,
   hasAnyScoringDice,
@@ -34,7 +35,6 @@ function formatScore(value: number): string {
 const RECORDS_KEY = "dungeon-alea-records";
 const ROLL_ANIMATION_MS = 300;
 const MY_BAD_REROLL_DELAY_MS = 300;
-const BAND_AID_ACTIVATION_DELAY_MS = 200;
 const ROLL_TICK_MS = 50;
 const MARKET_EXIT_MS = 520;
 const HEALTH_CLEAR_SEQUENCE_MS = 620;
@@ -145,7 +145,7 @@ function getSelectedValues(state: SaveData): number[] {
 }
 
 function hasSelectedTriplet(state: SaveData): boolean {
-  const breakdown = calculateSelectedScore(state, { includeMomentum: false });
+  const breakdown = calculateSelectedScore(state);
   if (!breakdown.valid || breakdown.score <= 0) {
     return false;
   }
@@ -191,6 +191,8 @@ const JOKER_IMAGE_PATHS: Partial<Record<string, string>> = {
   overtime: assetPath("/jokers/overtime.png"),
   "hold-em": assetPath("/jokers/hold'em.png"),
   "gold-mine": assetPath("/jokers/gold%20mine.png"),
+  "golden-ratio": assetPath("/jokers/golden%20raito.png"),
+  "the-portrait": assetPath("/jokers/the%20portrait.png"),
   investment: assetPath("/jokers/investment.png"),
   "wake-up": assetPath("/jokers/wake%20up.png"),
   "faustian-bargain": assetPath("/jokers/faustian%20bargain.png")
@@ -283,9 +285,9 @@ function App() {
           state.dice.values,
           state.dice.locked,
           state.run.currentBoss,
-          state.jokers.includes("discount"),
+          getJokerCount(state, "discount") > 0,
           state.dice.disabled,
-          state.jokers.includes("hold-em")
+          getJokerCount(state, "hold-em") > 0
         )
       : new Set<number>();
   const bossId: BossId | "normal" = state.run.currentBoss ?? "normal";
@@ -314,12 +316,12 @@ function App() {
       ? Math.round(selectedPreviewTurnScore * 1.2 ** selectedBloodyCount)
       : selectedPreviewTurnScore;
   const rawPreviewTurnScore =
-    state.jokers.includes("sparta") && activeDiceCount === 1 && hasSelectedScore
-      ? bloodyPreviewTurnScore * 3
+    getJokerCount(state, "sparta") > 0 && activeDiceCount === 1 && hasSelectedScore
+      ? bloodyPreviewTurnScore * 3 ** getJokerCount(state, "sparta")
       : bloodyPreviewTurnScore;
   const previewTurnScore =
-    state.jokers.includes("big-risk") && state.dice.rollCount >= 4
-      ? rawPreviewTurnScore * 2
+    getJokerCount(state, "big-risk") > 0 && state.dice.rollCount >= 4
+      ? rawPreviewTurnScore * 2 ** getJokerCount(state, "big-risk")
       : rawPreviewTurnScore;
   const [displayDamage, setDisplayDamage] = useState(previewTurnScore);
   const [damageDeltaPopups, setDamageDeltaPopups] = useState<DamageDeltaPopup[]>([]);
@@ -365,7 +367,7 @@ function App() {
   const displayedDiceValues = isRolling && rollingDiceValues.length === state.dice.values.length
     ? rollingDiceValues
     : state.dice.values;
-  const currentTurnLimit = TURN_LIMIT + (state.jokers.includes("deal") ? 1 : 0);
+  const currentTurnLimit = TURN_LIMIT + getJokerCount(state, "deal");
   const displayedTurnCount = marketVisible ? currentTurnLimit : Math.max(0, displayTurns - 1);
   const gameOverBestScore = Math.max(records.bestScore, state.run.totalScore);
 
@@ -390,23 +392,30 @@ function App() {
     jokerEffectTimeoutsRef.current.push(timeoutId);
   };
 
+  const triggerEffectiveJokerEffect = (jokerId: JokerId, label?: string) => {
+    triggerJokerEffect(jokerId, label);
+    if (state.flags.portraitCopiedJoker === jokerId) {
+      window.setTimeout(() => triggerJokerEffect("the-portrait", label), 90);
+    }
+  };
+
   const triggerBigRiskActivation = (beforeRollCount: number, after: SaveData) => {
-    if (after.jokers.includes("big-risk") && beforeRollCount < 4 && after.dice.rollCount >= 4) {
-      triggerJokerEffect("big-risk");
+    if (getJokerCount(after, "big-risk") > 0 && beforeRollCount < 4 && after.dice.rollCount >= 4) {
+      triggerEffectiveJokerEffect("big-risk");
     }
   };
 
   const triggerWakeUpActivation = (before: SaveData, after: SaveData) => {
     const previousLogIds = new Set(before.log.map((entry) => entry.id));
     if (after.log.some((entry) => !previousLogIds.has(entry.id) && entry.text.startsWith("Wake Up reactivated"))) {
-      triggerJokerEffect("wake-up");
+      triggerEffectiveJokerEffect("wake-up");
     }
   };
 
   const triggerFaustianBargainActivation = (before: SaveData, after: SaveData) => {
     const previousLogIds = new Set(before.log.map((entry) => entry.id));
     if (after.log.some((entry) => !previousLogIds.has(entry.id) && entry.text.startsWith("Faustian Bargain spent"))) {
-      triggerJokerEffect("faustian-bargain");
+      triggerEffectiveJokerEffect("faustian-bargain");
     }
   };
 
@@ -421,31 +430,31 @@ function App() {
     const hotDiceTriggered = !beforeAllUnavailable && afterAllUnavailable && after.dice.hotDice;
 
     if (options.triggerJustOneMore !== false && before.dice.rollCount >= 3) {
-      triggerJokerEffect("just-one-more");
+      triggerEffectiveJokerEffect("just-one-more");
     }
     if (options.triggerMomentum !== false) {
-      triggerJokerEffect("momentum");
+      triggerEffectiveJokerEffect("momentum");
     }
     if (before.flags.feverCharges > 0 && !hotDiceTriggered) {
-      triggerJokerEffect("fever");
+      triggerEffectiveJokerEffect("fever");
     }
-    if (hotDiceTriggered && before.jokers.includes("fever")) {
-      triggerJokerEffect("fever");
+    if (hotDiceTriggered && getJokerCount(before, "fever") > 0) {
+      triggerEffectiveJokerEffect("fever");
     }
-    if (hotDiceTriggered && before.jokers.includes("clean-sweep")) {
-      triggerJokerEffect("clean-sweep");
+    if (hotDiceTriggered && getJokerCount(before, "clean-sweep") > 0) {
+      triggerEffectiveJokerEffect("clean-sweep");
     }
-    if (before.jokers.includes("discount") && isDiscountSmallStraight(before)) {
-      triggerJokerEffect("discount");
+    if (getJokerCount(before, "discount") > 0 && isDiscountSmallStraight(before)) {
+      triggerEffectiveJokerEffect("discount");
     }
   };
 
   const triggerFarkleJokerEffects = (before: SaveData, after: SaveData) => {
-    if (!before.flags.bandAidUsedRound && after.flags.bandAidUsedRound) {
-      triggerJokerEffect("band-aid");
+    if (after.flags.bandAidUsesRound > before.flags.bandAidUsesRound) {
+      triggerEffectiveJokerEffect("band-aid");
     }
     if (after.run.roundScore > before.run.roundScore && before.run.turnScore > 0) {
-      triggerJokerEffect("insurance");
+      triggerEffectiveJokerEffect("insurance");
     }
   };
 
@@ -981,7 +990,7 @@ function App() {
         clickedValue !== 5 &&
         (isStraight(activeValues) ||
           isThreePairs(activeValues) ||
-          (state.jokers.includes("discount") &&
+          (getJokerCount(state, "discount") > 0 &&
             ([1, 2, 3, 4, 5].every((value) => activeValues.includes(value)) ||
               [2, 3, 4, 5, 6].every((value) => activeValues.includes(value)))))
       ) {
@@ -1012,7 +1021,7 @@ function App() {
       getSelectedValues(state).filter((value) => value === 1).length < 2 &&
       getSelectedValues(next).filter((value) => value === 1).length >= 2;
     const spartaStarted =
-      state.jokers.includes("sparta") &&
+      getJokerCount(state, "sparta") > 0 &&
       state.dice.values.filter((_, diceIndex) => !state.dice.locked[diceIndex] && !state.dice.disabled[diceIndex]).length === 1 &&
       !state.dice.selected[index] &&
       next.dice.selected[index] &&
@@ -1023,26 +1032,26 @@ function App() {
       const selectedCount = next.dice.selected.filter(Boolean).length;
       const selectedMoreDice = selectedCount > state.dice.selected.filter(Boolean).length;
       if (selectedTripletStarted) {
-        triggerJokerEffect("triplet");
+        triggerEffectiveJokerEffect("triplet");
       }
       if (discountComboStarted) {
-        triggerJokerEffect("discount");
+        triggerEffectiveJokerEffect("discount");
       }
       if (selectedSnakeEyesStarted) {
-        triggerJokerEffect("snake-eyes");
+        triggerEffectiveJokerEffect("snake-eyes");
       }
       if (spartaStarted) {
-        triggerJokerEffect("sparta");
+        triggerEffectiveJokerEffect("sparta");
       }
       if (selectedMoreDice && state.flags.feverCharges > 0) {
-        triggerJokerEffect("fever");
+        triggerEffectiveJokerEffect("fever");
       }
       if (state.dice.rollCount > 1) {
         const greedyMultiplier = getGreedyMultiplier(state.dice.rollCount);
-        triggerJokerEffect("greedy", `x${greedyMultiplier.toFixed(1)}`);
+        triggerEffectiveJokerEffect("greedy", `x${greedyMultiplier.toFixed(1)}`);
       }
       if (state.dice.rollCount >= 4) {
-        triggerJokerEffect("big-risk");
+        triggerEffectiveJokerEffect("big-risk");
       }
       playUiSound("select", { step: changedCount > 1 ? 1 : selectedCount });
     }
@@ -1052,8 +1061,12 @@ function App() {
     if (attackCanBank) {
       suppressNextDamageDeltaRef.current = true;
       const next = hasSelectedScore ? confirmSelection(state) : state;
+      const pocketChangeActivated = getJokerCount(next, "pocket-change") > 0 && next.dice.rollCount <= 3;
       const banked = bankScore(next);
       playUiSound("click");
+      if (pocketChangeActivated) {
+        triggerEffectiveJokerEffect("pocket-change");
+      }
 
       if (banked.shop.open || banked.run.gameOver) {
         apply(banked, "attack");
@@ -1095,7 +1108,6 @@ function App() {
     };
 
     const finishResolvedRoll = (before: SaveData, after: SaveData) => {
-      const bandAidActivated = !before.flags.bandAidUsedRound && after.flags.bandAidUsedRound;
       const applyResolvedRoll = (triggerFarkleEffects = true) => {
         setFarkleResolving(false);
         setIsRolling(false);
@@ -1109,25 +1121,11 @@ function App() {
         rollTimeoutRef.current = null;
       };
 
-      if (bandAidActivated) {
-        setFarkleResolving(true);
-        rollTimeoutRef.current = window.setTimeout(() => {
-          const bandAidRollMask = after.dice.values.map(
-            (_, index) => !after.dice.locked[index] && !after.dice.disabled[index]
-          );
-          triggerFarkleJokerEffects(before, after);
-          setRollingDiceMask(bandAidRollMask);
-          setRollingDiceValues(after.dice.values.map((value, index) => (bandAidRollMask[index] ? randomDisplayDie() : value)));
-          setIsRolling(true);
-          playUiSound("roll");
-          rollTimeoutRef.current = window.setTimeout(() => applyResolvedRoll(false), ROLL_ANIMATION_MS);
-        }, BAND_AID_ACTIVATION_DELAY_MS);
-      } else {
-        applyResolvedRoll();
-      }
+      applyResolvedRoll();
     };
 
-    if (!rolledState.jokers.includes("my-bad")) {
+    const myBadCount = getJokerCount(rolledState, "my-bad");
+    if (myBadCount <= 0) {
       setIsRolling(false);
       setRollingDiceMask([]);
       setRollingDiceValues([]);
@@ -1135,64 +1133,72 @@ function App() {
       return;
     }
 
-    const scoringIndicesAfterRoll = getScoringIndices(
-      rolledState.dice.values,
-      rolledState.dice.locked,
-      rolledState.run.currentBoss,
-      rolledState.jokers.includes("discount"),
-      rolledState.dice.disabled,
-      rolledState.jokers.includes("hold-em")
-    );
-    const nonScoringIndices = rolledState.dice.values
-      .map((_, index) => index)
-      .filter((index) => rollMask[index] && !rolledState.dice.locked[index] && !rolledState.dice.disabled[index] && !scoringIndicesAfterRoll.has(index));
+    const nonScoringIndicesFor = (candidate: SaveData) => {
+      const scoringIndicesAfterRoll = getScoringIndices(
+        candidate.dice.values,
+        candidate.dice.locked,
+        candidate.run.currentBoss,
+        getJokerCount(candidate, "discount") > 0,
+        candidate.dice.disabled,
+        getJokerCount(candidate, "hold-em") > 0
+      );
+      return candidate.dice.values
+        .map((_, index) => index)
+        .filter((index) => rollMask[index] && !candidate.dice.locked[index] && !candidate.dice.disabled[index] && !scoringIndicesAfterRoll.has(index));
+    };
 
-    if (nonScoringIndices.length === 0) {
+    const finishMyBadChain = (current: SaveData) => {
+      const activeValuesAfterReroll = current.dice.values.filter((_, index) => !current.dice.locked[index] && !current.dice.disabled[index]);
+      const finalState = hasAnyScoringDice(
+        activeValuesAfterReroll,
+        current.run.currentBoss,
+        getJokerCount(current, "discount") > 0,
+        getJokerCount(current, "hold-em") > 0
+      )
+        ? current
+        : handleFarkle(current);
       setIsRolling(false);
       setIsMyBadRerollPending(false);
       setRollingDiceMask([]);
       setRollingDiceValues([]);
-      setState(rolledState);
-      triggerRollCompleteEffects();
-      rollTimeoutRef.current = null;
-      return;
-    }
+      finishResolvedRoll(current, finalState);
+    };
 
-    const rerollIndex = nonScoringIndices[Math.floor(Math.random() * nonScoringIndices.length)];
-    triggerJokerEffect("my-bad");
-    const rerolledState = cloneState(rolledState);
-    rerolledState.dice.values[rerollIndex] = randomDisplayDie();
-    rerolledState.log.unshift({ id: makeId(), text: `My bad rerolled die ${rerollIndex + 1}.`, tone: "good" });
-    rerolledState.updatedAt = Date.now();
+    const runMyBadReroll = (current: SaveData, remaining: number) => {
+      const nonScoringIndices = nonScoringIndicesFor(current);
+      if (remaining <= 0 || nonScoringIndices.length === 0) {
+        finishMyBadChain(current);
+        return;
+      }
 
-    const activeValuesAfterReroll = rerolledState.dice.values.filter((_, index) => !rerolledState.dice.locked[index] && !rerolledState.dice.disabled[index]);
-    const finalState = hasAnyScoringDice(
-      activeValuesAfterReroll,
-      rerolledState.run.currentBoss,
-      rerolledState.jokers.includes("discount"),
-      rerolledState.jokers.includes("hold-em")
-    )
-      ? rerolledState
-      : handleFarkle(rerolledState);
+      const rerollIndex = nonScoringIndices[Math.floor(Math.random() * nonScoringIndices.length)];
+      triggerEffectiveJokerEffect("my-bad");
+      const rerolledState = cloneState(current);
+      rerolledState.dice.values[rerollIndex] = randomDisplayDie();
+      rerolledState.log.unshift({ id: makeId(), text: `My bad rerolled die ${rerollIndex + 1}.`, tone: "good" });
+      rerolledState.updatedAt = Date.now();
 
-    setState(rolledState);
-    setIsRolling(false);
-    setIsMyBadRerollPending(true);
-    setRollingDiceMask([]);
-    setRollingDiceValues([]);
-    rollTimeoutRef.current = window.setTimeout(() => {
-      setRollingDiceMask(rolledState.dice.values.map((_, index) => index === rerollIndex));
-      setRollingDiceValues(rolledState.dice.values);
-      setIsRolling(true);
-      setIsMyBadRerollPending(false);
-      playUiSound("roll");
+      setState(current);
+      setIsRolling(false);
+      setIsMyBadRerollPending(true);
+      setRollingDiceMask([]);
+      setRollingDiceValues([]);
       rollTimeoutRef.current = window.setTimeout(() => {
-        setIsRolling(false);
-        setRollingDiceMask([]);
-        setRollingDiceValues([]);
-        finishResolvedRoll(rerolledState, finalState);
-      }, ROLL_ANIMATION_MS);
-    }, MY_BAD_REROLL_DELAY_MS);
+        setRollingDiceMask(current.dice.values.map((_, index) => index === rerollIndex));
+        setRollingDiceValues(current.dice.values);
+        setIsRolling(true);
+        setIsMyBadRerollPending(false);
+        playUiSound("roll");
+        rollTimeoutRef.current = window.setTimeout(() => {
+          setIsRolling(false);
+          setRollingDiceMask([]);
+          setRollingDiceValues([]);
+          runMyBadReroll(rerolledState, remaining - 1);
+        }, ROLL_ANIMATION_MS);
+      }, MY_BAD_REROLL_DELAY_MS);
+    };
+
+    runMyBadReroll(rolledState, myBadCount);
   };
 
   const onRoll = () => {
@@ -1205,7 +1211,7 @@ function App() {
       triggerConfirmJokerEffects(state, scoredState, { triggerMomentum: false });
       allowNextHotDiceOverlayRef.current = scoredState.dice.hotDice;
       const allUnavailable = scoredState.dice.locked.every((locked, index) => locked || scoredState.dice.disabled[index]);
-      const next = rollDice(scoredState, { deferFarkle: scoredState.jokers.includes("my-bad") });
+      const next = rollDice(scoredState, { deferFarkle: getJokerCount(scoredState, "my-bad") > 0 });
       const wakeUpActivated = next.log.some(
         (entry) => !scoredState.log.some((previous) => previous.id === entry.id) && entry.text.startsWith("Wake Up reactivated")
       );
@@ -1239,7 +1245,7 @@ function App() {
 
     const beforeRollCount = state.dice.rollCount;
     const allUnavailable = state.dice.locked.every((locked, index) => locked || state.dice.disabled[index]);
-    const next = rollDice(state, { deferFarkle: state.jokers.includes("my-bad") });
+    const next = rollDice(state, { deferFarkle: getJokerCount(state, "my-bad") > 0 });
     const wakeUpActivated = next.log.some(
       (entry) => !state.log.some((previous) => previous.id === entry.id) && entry.text.startsWith("Wake Up reactivated")
     );
@@ -1261,7 +1267,11 @@ function App() {
     playUiSound("click");
     playUiSound("roll");
     rollTimeoutRef.current = window.setTimeout(() => {
-      finishRollAfterAnimation(next, rollMask, { beforeRollCount, beforeState: state });
+      finishRollAfterAnimation(next, rollMask, {
+        triggerMomentumAfterRoll: getJokerCount(state, "momentum") > 0 && state.run.turnScore > 0,
+        beforeRollCount,
+        beforeState: state
+      });
     }, ROLL_ANIMATION_MS);
   };
 
@@ -1574,6 +1584,21 @@ function App() {
         <div className="slot-row items-row">
           {itemSlots.map((jokerId, index) => {
             const jokerImagePath = jokerId ? getJokerImagePath(jokerId) : null;
+            const portraitCopiedImagePath =
+              jokerId === "the-portrait" &&
+              state.flags.portraitCopiedJoker &&
+              state.jokers.includes(state.flags.portraitCopiedJoker)
+                ? getJokerImagePath(state.flags.portraitCopiedJoker)
+                : null;
+            const jokerArtwork =
+              jokerId === "the-portrait" && portraitCopiedImagePath ? (
+                <span className="portrait-joker-stack" aria-hidden="true">
+                  <img className="relic-slot-joker-image portrait-copied-joker-image" src={portraitCopiedImagePath} alt="" draggable={false} />
+                  {jokerImagePath ? <img className="relic-slot-joker-image portrait-frame-joker-image" src={jokerImagePath} alt="" draggable={false} /> : null}
+                </span>
+              ) : jokerImagePath ? (
+                <img className="relic-slot-joker-image" src={jokerImagePath} alt="" draggable={false} />
+              ) : null;
             const jokerEffect = jokerId
               ? activeJokerEffects.filter((effect) => effect.jokerId === jokerId).at(-1) ?? null
               : null;
@@ -1581,11 +1606,12 @@ function App() {
             const salePending = pendingJokerSaleIndex === index && !!jokerId;
             const canSellJoker = marketVisible && !rewardAnimating && !marketLeaving && !pendingJokerSaleId && !!jokerId;
             const inactive =
-              (jokerId === "band-aid" && state.flags.bandAidUsedRound && !state.run.cleared) ||
+              (jokerId === "band-aid" && state.flags.bandAidUsesRound >= getJokerCount(state, "band-aid") && !state.run.cleared) ||
               (jokerId === "big-risk" && state.dice.rollCount < 4) ||
               (jokerId === "double-or-nothing" && state.run.turnNumber !== 1) ||
               (jokerId === "fever" && state.flags.feverCharges <= 0) ||
-              (jokerId === "overtime" && state.run.turnsLeft !== 1);
+              (jokerId === "overtime" && state.run.turnsLeft !== 1) ||
+              (jokerId === "pocket-change" && (state.dice.rollCount >= 4 || (isRolling && state.dice.rollCount >= 3)));
             const slotClassName = `board-slot relic-slot ${jokerId ? "filled" : "empty"} ${inactive ? "inactive" : ""} ${jokerEffect ? "joker-effect" : ""} ${salePending ? "sell-pending" : ""} ${canSellJoker ? "sellable" : ""}`;
             const labelClassName = `joker-effect-label ${jokerId === "greedy" ? "greedy-effect-label" : ""}`;
             return canSellJoker ? (
@@ -1596,7 +1622,7 @@ function App() {
                 onClick={() => onJokerSlotClick(index)}
                 aria-label={`Sell ${jokerName}`}
               >
-                {jokerImagePath ? <img className="relic-slot-joker-image" src={jokerImagePath} alt="" draggable={false} /> : null}
+                {jokerArtwork}
                 {jokerEffect?.label ? <span className={labelClassName}>{jokerEffect.label}</span> : null}
               </button>
             ) : (
@@ -1604,7 +1630,7 @@ function App() {
                 key={`item-${index}-${jokerEffect?.key ?? "idle"}`}
                 className={slotClassName}
               >
-                {jokerImagePath ? <img className="relic-slot-joker-image" src={jokerImagePath} alt="" draggable={false} /> : null}
+                {jokerArtwork}
                 {jokerEffect?.label ? <span className={labelClassName}>{jokerEffect.label}</span> : null}
               </div>
             );

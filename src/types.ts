@@ -21,6 +21,8 @@ export type JokerId =
   | "hold-em"
   | "gold-mine"
   | "investment"
+  | "golden-ratio"
+  | "the-portrait"
   | "wake-up"
   | "faustian-bargain";
 
@@ -140,10 +142,11 @@ export interface SaveData {
   meta: MetaState;
   log: LogEntry[];
   flags: {
-    bandAidUsedRound: boolean;
+    bandAidUsesRound: number;
     feverCharges: number;
     successfulScoresThisTurn: number;
     hadFarkleRound: boolean;
+    portraitCopiedJoker: JokerId | null;
   };
 }
 
