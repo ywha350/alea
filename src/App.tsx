@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, SyntheticEvent } from "react";
 import "./index.css";
 import { assetPath } from "./game/asset";
 import { BOSSES, JOKERS, SPECIAL_DICE, TURN_LIMIT, UPGRADES } from "./game/constants";
@@ -16,12 +16,14 @@ import {
   finishFarkleTurn,
   getFaceUpgradeLevel,
   getFaceUpgradeScale,
+  getActivePortraitCopy,
   getGreedyMultiplier,
   getJokerCount,
   getScoringIndices,
   handleFarkle,
   hasAnyScoringDice,
   getUpgradeFace,
+  normalizePortraitCopy,
   nextRound,
   rollDice,
   toggleDieSelection
@@ -159,6 +161,10 @@ function isDiscountSmallStraight(state: SaveData): boolean {
   return values.length === 5 && (key === "1,2,3,4,5" || key === "2,3,4,5,6");
 }
 
+function getDualityMultiplierLabel(stack: number): string {
+  return `x${2 ** stack}`;
+}
+
 const BOSS_TITLES: Record<string, string> = {
   normal: "Bone Croupier",
   "bone-croupier": "Bone Croupier",
@@ -193,15 +199,78 @@ const JOKER_IMAGE_PATHS: Partial<Record<string, string>> = {
   "gold-mine": assetPath("/jokers/gold%20mine.png"),
   "golden-ratio": assetPath("/jokers/golden%20raito.png"),
   "the-portrait": assetPath("/jokers/the%20portrait.png"),
+  "odd-choice": assetPath("/jokers/odd%20choice.png"),
+  duality: assetPath("/jokers/duality.png"),
   investment: assetPath("/jokers/investment.png"),
   "wake-up": assetPath("/jokers/wake%20up.png"),
   "faustian-bargain": assetPath("/jokers/faustian%20bargain.png")
 };
 
 const DUMMY_DIE_UPGRADE_IMAGE_PATH = assetPath("/dice/die1.png");
+const reportedMissingJokerImageRefs = new Set<string>();
 
-function getJokerImagePath(refId: string): string | null {
-  return JOKER_IMAGE_PATHS[refId] ?? null;
+function getJokerImagePath(refId: string, context = "joker"): string | null {
+  const imagePath = JOKER_IMAGE_PATHS[refId] ?? null;
+  if (!imagePath && !reportedMissingJokerImageRefs.has(refId)) {
+    reportedMissingJokerImageRefs.add(refId);
+    console.error("[joker-image] Missing Joker image mapping.", {
+      refId,
+      context,
+      knownRefs: Object.keys(JOKER_IMAGE_PATHS)
+    });
+  }
+  return imagePath;
+}
+
+function logJokerImageLoadFailure(
+  event: SyntheticEvent<HTMLImageElement>,
+  details: { refId: string | null; context: string; slotIndex?: number; expectedSrc?: string | null }
+): void {
+  const image = event.currentTarget;
+  const src = image.currentSrc || image.src || details.expectedSrc || "";
+  const baseDetails = {
+    ...details,
+    src,
+    currentSrc: image.currentSrc,
+    naturalWidth: image.naturalWidth,
+    naturalHeight: image.naturalHeight,
+    pageUrl: window.location.href,
+    baseUrl: import.meta.env.BASE_URL
+  };
+
+  if (!src) {
+    console.error("[joker-image] Failed to load Joker image: empty image src.", baseDetails);
+    return;
+  }
+
+  console.error("[joker-image] Failed to load Joker image.", baseDetails);
+  void fetch(src, { method: "HEAD", cache: "no-store" })
+    .then((response) => {
+      const contentType = response.headers.get("content-type") ?? "";
+      const contentLength = response.headers.get("content-length") ?? "";
+      const probableCause = !response.ok
+        ? `HTTP ${response.status} ${response.statusText || "error"}`
+        : contentType && !contentType.startsWith("image/")
+          ? `Unexpected content-type: ${contentType}`
+          : contentLength === "0"
+            ? "The server returned an empty file."
+            : "The URL responded, so check for a corrupt/unsupported image file or stale browser cache.";
+
+      console.error("[joker-image] Joker image load diagnostics.", {
+        ...baseDetails,
+        httpStatus: response.status,
+        ok: response.ok,
+        contentType,
+        contentLength,
+        probableCause
+      });
+    })
+    .catch((error: unknown) => {
+      console.error("[joker-image] Could not diagnose Joker image load failure.", {
+        ...baseDetails,
+        probableCause: error instanceof Error ? error.message : String(error)
+      });
+    });
 }
 
 function getHandUpgradeSymbol(refId: string): string {
@@ -223,10 +292,6 @@ const BOSS_MONSTER_IDLE: Record<string, string[]> = {
   "heavy-bones": Array.from({ length: 4 }, (_, index) => `${PRIEST_IDLE_BASE}/priest2/v1/priest2_v1_${index + 1}.png`),
   "poor-house": Array.from({ length: 4 }, (_, index) => `${PRIEST_IDLE_BASE}/priest3/v1/priest3_v1_${index + 1}.png`)
 };
-
-function getBossTone(round: number): "base" | "blue" {
-  return (round - 1) % 2 === 1 ? "blue" : "base";
-}
 
 function App() {
   const [state, setState] = useState<SaveData>(createInitialState);
@@ -271,6 +336,8 @@ function App() {
   const cleanSweepTimeoutsRef = useRef<number[]>([]);
   const cleanSweepAnimationFrameRef = useRef<number | null>(null);
   const gameOverOverlayTimeoutRef = useRef<number | null>(null);
+  const stateRef = useRef(state);
+  const scoreAnimationFrameRef = useRef<number | null>(null);
   const previousRoundScoreRef = useRef(state.run.roundScore);
   const lastHotDiceLogIdRef = useRef<string | null>(null);
   const lastCleanSweepLogIdRef = useRef<string | null>(null);
@@ -287,7 +354,8 @@ function App() {
           state.run.currentBoss,
           getJokerCount(state, "discount") > 0,
           state.dice.disabled,
-          getJokerCount(state, "hold-em") > 0
+          getJokerCount(state, "hold-em") > 0,
+          getJokerCount(state, "odd-choice") > 0
         )
       : new Set<number>();
   const bossId: BossId | "normal" = state.run.currentBoss ?? "normal";
@@ -297,7 +365,7 @@ function App() {
     : "The house is watching. Try not to roll anything embarrassing.";
   const bossMonsterFrames = BOSS_MONSTER_IDLE[bossId];
   const bossMonsterImage = bossMonsterFrames[monsterIdleFrame % bossMonsterFrames.length];
-  const bossTone = getBossTone(state.run.round);
+  const bossTone = state.run.currentBossTone;
   const enemyHpRemaining = Math.max(0, state.run.targetScore - state.run.roundScore);
   const enemyHpRatio =
     state.run.targetScore <= 0 ? 0 : Math.max(0, 1 - state.run.roundScore / state.run.targetScore);
@@ -324,9 +392,11 @@ function App() {
       ? rawPreviewTurnScore * 2 ** getJokerCount(state, "big-risk")
       : rawPreviewTurnScore;
   const [displayDamage, setDisplayDamage] = useState(previewTurnScore);
+  const [displayScore, setDisplayScore] = useState(state.run.totalScore);
   const [damageDeltaPopups, setDamageDeltaPopups] = useState<DamageDeltaPopup[]>([]);
   const [damageDanger, setDamageDanger] = useState(false);
   const displayDamageRef = useRef(previewTurnScore);
+  const displayScoreRef = useRef(state.run.totalScore);
   const previousDamageTargetRef = useRef(previewTurnScore);
   const suppressNextDamageDeltaRef = useRef(false);
   const damagePopupDieIndexRef = useRef<number | null>(null);
@@ -370,8 +440,10 @@ function App() {
   const currentTurnLimit = TURN_LIMIT + getJokerCount(state, "deal");
   const displayedTurnCount = marketVisible ? currentTurnLimit : Math.max(0, displayTurns - 1);
   const gameOverBestScore = Math.max(records.bestScore, state.run.totalScore);
+  const activePortraitCopy = getActivePortraitCopy(state);
 
   const apply = (next: SaveData, sound?: Parameters<typeof playUiSound>[0]) => {
+    stateRef.current = next;
     setState(next);
     if (sound) {
       playUiSound(sound);
@@ -392,15 +464,34 @@ function App() {
     jokerEffectTimeoutsRef.current.push(timeoutId);
   };
 
-  const triggerEffectiveJokerEffect = (jokerId: JokerId, label?: string) => {
+  const triggerEffectiveJokerEffect = (
+    jokerId: JokerId,
+    label?: string,
+    options: { portraitTiming?: "sync" | "delayed" | "exclusive" } = {}
+  ) => {
+    const portraitCopiesJoker = getActivePortraitCopy(state) === jokerId;
+    if (options.portraitTiming === "exclusive" && portraitCopiesJoker) {
+      triggerJokerEffect(Math.random() < 0.5 ? jokerId : "the-portrait", label);
+      return;
+    }
+
     triggerJokerEffect(jokerId, label);
-    if (state.flags.portraitCopiedJoker === jokerId) {
-      window.setTimeout(() => triggerJokerEffect("the-portrait", label), 90);
+    if (portraitCopiesJoker) {
+      if (options.portraitTiming === "delayed") {
+        window.setTimeout(() => triggerJokerEffect("the-portrait", label), 90);
+      } else {
+        triggerJokerEffect("the-portrait", label);
+      }
     }
   };
 
-  const triggerBigRiskActivation = (beforeRollCount: number, after: SaveData) => {
-    if (getJokerCount(after, "big-risk") > 0 && beforeRollCount < 4 && after.dice.rollCount >= 4) {
+  const triggerBigRiskActivation = (before: SaveData, after: SaveData) => {
+    if (
+      getJokerCount(after, "big-risk") > 0 &&
+      before.dice.rollCount < 4 &&
+      after.dice.rollCount >= 4 &&
+      !hasNewFarkleLog(before, after)
+    ) {
       triggerEffectiveJokerEffect("big-risk");
     }
   };
@@ -408,15 +499,45 @@ function App() {
   const triggerWakeUpActivation = (before: SaveData, after: SaveData) => {
     const previousLogIds = new Set(before.log.map((entry) => entry.id));
     if (after.log.some((entry) => !previousLogIds.has(entry.id) && entry.text.startsWith("Wake Up reactivated"))) {
-      triggerEffectiveJokerEffect("wake-up");
+      triggerEffectiveJokerEffect("wake-up", undefined, { portraitTiming: "exclusive" });
     }
   };
 
   const triggerFaustianBargainActivation = (before: SaveData, after: SaveData) => {
     const previousLogIds = new Set(before.log.map((entry) => entry.id));
     if (after.log.some((entry) => !previousLogIds.has(entry.id) && entry.text.startsWith("Faustian Bargain spent"))) {
-      triggerEffectiveJokerEffect("faustian-bargain");
+      triggerEffectiveJokerEffect("faustian-bargain", undefined, { portraitTiming: "exclusive" });
     }
+  };
+
+  const hasNewFarkleLog = (before: SaveData, after: SaveData) => {
+    const previousLogIds = new Set(before.log.map((entry) => entry.id));
+    return after.log.some((entry) => !previousLogIds.has(entry.id) && entry.text.startsWith("Farkle."));
+  };
+
+  const hasRollScoringDice = (candidate: SaveData) => {
+    const activeValuesAfterRoll = candidate.dice.values.filter((_, index) => !candidate.dice.locked[index] && !candidate.dice.disabled[index]);
+    return hasAnyScoringDice(
+      activeValuesAfterRoll,
+      candidate.run.currentBoss,
+      getJokerCount(candidate, "discount") > 0,
+      getJokerCount(candidate, "hold-em") > 0,
+      getJokerCount(candidate, "odd-choice") > 0
+    );
+  };
+
+  const triggerMomentumRollActivation = (before: SaveData, after: SaveData) => {
+    if (
+      getJokerCount(before, "momentum") <= 0 ||
+      before.run.turnScore <= 0 ||
+      hasNewFarkleLog(before, after) ||
+      !hasRollScoringDice(after)
+    ) {
+      return false;
+    }
+
+    triggerEffectiveJokerEffect("momentum");
+    return true;
   };
 
   const triggerConfirmJokerEffects = (
@@ -450,13 +571,27 @@ function App() {
   };
 
   const triggerFarkleJokerEffects = (before: SaveData, after: SaveData) => {
+    if (after.flags.dualityStacks.original > before.flags.dualityStacks.original) {
+      triggerJokerEffect("duality");
+    }
+    if (after.flags.dualityStacks.portrait > before.flags.dualityStacks.portrait) {
+      triggerJokerEffect("the-portrait");
+    }
     if (after.flags.bandAidUsesRound > before.flags.bandAidUsesRound) {
-      triggerEffectiveJokerEffect("band-aid");
+      if (getActivePortraitCopy(after) === "band-aid" && after.flags.bandAidUsesRound > 1) {
+        triggerJokerEffect("the-portrait");
+      } else {
+        triggerJokerEffect("band-aid");
+      }
     }
     if (after.run.roundScore > before.run.roundScore && before.run.turnScore > 0) {
       triggerEffectiveJokerEffect("insurance");
     }
   };
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   const stopMarketAppearAnimation = () => {
     setMarketEntering(false);
@@ -576,7 +711,7 @@ function App() {
 
     lastTurnOverlayKeyRef.current = lastTurnKey;
     setLastTurnOverlayId(lastTurnKey);
-    triggerJokerEffect("overtime");
+    triggerEffectiveJokerEffect("overtime");
 
     if (lastTurnOverlayTimeoutRef.current !== null) {
       window.clearTimeout(lastTurnOverlayTimeoutRef.current);
@@ -752,8 +887,13 @@ function App() {
   }, [clearLog, rewardBreakdown, rewardSequenceReady, state.run.cleared, state.run.money, state.run.turnsLeft, state.shop.open]);
 
   useEffect(() => {
-    const cleanSweepLog = state.log.find((entry) => entry.text === "Clean Sweep gained $2.");
+    const cleanSweepLog = state.log.find((entry) => entry.text.startsWith("Clean Sweep gained $"));
     if (!cleanSweepLog || cleanSweepLog.id === lastCleanSweepLogIdRef.current) {
+      return;
+    }
+
+    const cleanSweepAmount = Number(cleanSweepLog.text.match(/Clean Sweep gained \$(\d+)\./)?.[1] ?? 0);
+    if (cleanSweepAmount <= 0) {
       return;
     }
 
@@ -768,12 +908,12 @@ function App() {
       ? rewardBreakdown.reduce((sum, item) => sum + item.amount, 0)
       : 0;
     const to = state.run.money - pendingClearReward;
-    const from = to - 2;
+    const from = to - cleanSweepAmount;
     const popupKey = `${cleanSweepLog.id}-sweep`;
     const startedAt = performance.now();
 
     setDisplayMoney(from);
-    setRewardPopups((current) => [...current, { key: popupKey, label: "+sweep", amount: 2 }]);
+    setRewardPopups((current) => [...current, { key: popupKey, label: "+sweep", amount: cleanSweepAmount }]);
     playUiSound("coin");
 
     const tick = (now: number) => {
@@ -831,6 +971,49 @@ function App() {
       return next;
     });
   }, [showGameOverOverlay, state.run.gameOver, state.run.totalScore]);
+
+  useEffect(() => {
+    if (scoreAnimationFrameRef.current !== null) {
+      cancelAnimationFrame(scoreAnimationFrameRef.current);
+      scoreAnimationFrameRef.current = null;
+    }
+
+    const from = displayScoreRef.current;
+    const to = state.run.totalScore;
+    if (from === to) {
+      setDisplayScore(to);
+      return;
+    }
+
+    const durationMs = Math.min(900, Math.max(260, Math.abs(to - from) * 2));
+    const startedAt = performance.now();
+
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / durationMs);
+      const eased = 1 - (1 - progress) ** 3;
+      const nextValue = Math.round(from + (to - from) * eased);
+
+      displayScoreRef.current = nextValue;
+      setDisplayScore(nextValue);
+
+      if (progress < 1) {
+        scoreAnimationFrameRef.current = requestAnimationFrame(tick);
+      } else {
+        scoreAnimationFrameRef.current = null;
+        displayScoreRef.current = to;
+        setDisplayScore(to);
+      }
+    };
+
+    scoreAnimationFrameRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (scoreAnimationFrameRef.current !== null) {
+        cancelAnimationFrame(scoreAnimationFrameRef.current);
+        scoreAnimationFrameRef.current = null;
+      }
+    };
+  }, [state.run.totalScore]);
 
   useEffect(() => {
     const previousTarget = previousDamageTargetRef.current;
@@ -910,6 +1093,9 @@ function App() {
       if (gameOverOverlayTimeoutRef.current !== null) {
         window.clearTimeout(gameOverOverlayTimeoutRef.current);
       }
+      if (scoreAnimationFrameRef.current !== null) {
+        cancelAnimationFrame(scoreAnimationFrameRef.current);
+      }
     };
   }, []);
 
@@ -983,11 +1169,14 @@ function App() {
       const unlockedIndices = state.dice.values
         .map((_, diceIndex) => diceIndex)
         .filter((diceIndex) => !state.dice.locked[diceIndex] && !state.dice.disabled[diceIndex]);
+      const clickedValueScoresAlone =
+        clickedValue === 1 ||
+        clickedValue === 5 ||
+        (getJokerCount(state, "odd-choice") > 0 && clickedValue === 3);
 
       let pulseIndices: number[] = [];
       if (
-        clickedValue !== 1 &&
-        clickedValue !== 5 &&
+        !clickedValueScoresAlone &&
         (isStraight(activeValues) ||
           isThreePairs(activeValues) ||
           (getJokerCount(state, "discount") > 0 &&
@@ -996,8 +1185,7 @@ function App() {
       ) {
         pulseIndices = unlockedIndices;
       } else if (
-        clickedValue !== 1 &&
-        clickedValue !== 5 &&
+        !clickedValueScoresAlone &&
         counts[clickedValue] >= 3
       ) {
         pulseIndices = unlockedIndices.filter((diceIndex) => state.dice.values[diceIndex] === clickedValue);
@@ -1050,7 +1238,13 @@ function App() {
         const greedyMultiplier = getGreedyMultiplier(state.dice.rollCount);
         triggerEffectiveJokerEffect("greedy", `x${greedyMultiplier.toFixed(1)}`);
       }
-      if (state.dice.rollCount >= 4) {
+      if (selectedMoreDice && state.jokers.includes("duality") && state.flags.dualityStacks.original > 0) {
+        triggerJokerEffect("duality", getDualityMultiplierLabel(state.flags.dualityStacks.original));
+      }
+      if (selectedMoreDice && activePortraitCopy === "duality" && state.flags.dualityStacks.portrait > 0) {
+        triggerJokerEffect("the-portrait", getDualityMultiplierLabel(state.flags.dualityStacks.portrait));
+      }
+      if (selectedMoreDice && getJokerCount(state, "big-risk") > 0 && state.dice.rollCount >= 4) {
         triggerEffectiveJokerEffect("big-risk");
       }
       playUiSound("select", { step: changedCount > 1 ? 1 : selectedCount });
@@ -1096,14 +1290,14 @@ function App() {
   const finishRollAfterAnimation = (
     rolledState: SaveData,
     rollMask: boolean[],
-    options: { triggerMomentumAfterRoll?: boolean; beforeRollCount?: number; beforeState?: SaveData } = {}
+    options: { beforeRollCount?: number; beforeState?: SaveData; triggerMomentumOnResolvedRoll?: boolean } = {}
   ) => {
-    const triggerRollCompleteEffects = () => {
-      if (options.triggerMomentumAfterRoll) {
-        triggerJokerEffect("momentum");
+    const triggerRollCompleteEffects = (before: SaveData, after: SaveData) => {
+      if (options.triggerMomentumOnResolvedRoll) {
+        triggerMomentumRollActivation(before, after);
       }
       if (options.beforeRollCount !== undefined) {
-        triggerBigRiskActivation(options.beforeRollCount, rolledState);
+        triggerBigRiskActivation(before, after);
       }
     };
 
@@ -1117,15 +1311,19 @@ function App() {
         if (triggerFarkleEffects) {
           triggerFarkleJokerEffects(before, after);
         }
-        triggerRollCompleteEffects();
+        triggerRollCompleteEffects(before, after);
         rollTimeoutRef.current = null;
       };
 
       applyResolvedRoll();
     };
 
-    const myBadCount = getJokerCount(rolledState, "my-bad");
-    if (myBadCount <= 0) {
+    const myBadAnimationQueue: JokerId[] = [
+      ...(rolledState.jokers.includes("my-bad") ? (["my-bad"] as JokerId[]) : []),
+      ...(getActivePortraitCopy(rolledState) === "my-bad" ? (["the-portrait"] as JokerId[]) : [])
+    ];
+
+    if (myBadAnimationQueue.length <= 0) {
       setIsRolling(false);
       setRollingDiceMask([]);
       setRollingDiceValues([]);
@@ -1140,7 +1338,8 @@ function App() {
         candidate.run.currentBoss,
         getJokerCount(candidate, "discount") > 0,
         candidate.dice.disabled,
-        getJokerCount(candidate, "hold-em") > 0
+        getJokerCount(candidate, "hold-em") > 0,
+        getJokerCount(candidate, "odd-choice") > 0
       );
       return candidate.dice.values
         .map((_, index) => index)
@@ -1153,7 +1352,8 @@ function App() {
         activeValuesAfterReroll,
         current.run.currentBoss,
         getJokerCount(current, "discount") > 0,
-        getJokerCount(current, "hold-em") > 0
+        getJokerCount(current, "hold-em") > 0,
+        getJokerCount(current, "odd-choice") > 0
       )
         ? current
         : handleFarkle(current);
@@ -1164,15 +1364,16 @@ function App() {
       finishResolvedRoll(current, finalState);
     };
 
-    const runMyBadReroll = (current: SaveData, remaining: number) => {
+    const runMyBadReroll = (current: SaveData, remainingAnimations: JokerId[]) => {
       const nonScoringIndices = nonScoringIndicesFor(current);
-      if (remaining <= 0 || nonScoringIndices.length === 0) {
+      if (remainingAnimations.length <= 0 || nonScoringIndices.length === 0) {
         finishMyBadChain(current);
         return;
       }
 
       const rerollIndex = nonScoringIndices[Math.floor(Math.random() * nonScoringIndices.length)];
-      triggerEffectiveJokerEffect("my-bad");
+      const [animationJokerId, ...nextAnimations] = remainingAnimations;
+      triggerJokerEffect(animationJokerId);
       const rerolledState = cloneState(current);
       rerolledState.dice.values[rerollIndex] = randomDisplayDie();
       rerolledState.log.unshift({ id: makeId(), text: `My bad rerolled die ${rerollIndex + 1}.`, tone: "good" });
@@ -1193,12 +1394,12 @@ function App() {
           setIsRolling(false);
           setRollingDiceMask([]);
           setRollingDiceValues([]);
-          runMyBadReroll(rerolledState, remaining - 1);
+          runMyBadReroll(rerolledState, nextAnimations);
         }, ROLL_ANIMATION_MS);
       }, MY_BAD_REROLL_DELAY_MS);
     };
 
-    runMyBadReroll(rolledState, myBadCount);
+    runMyBadReroll(rolledState, myBadAnimationQueue);
   };
 
   const onRoll = () => {
@@ -1211,7 +1412,8 @@ function App() {
       triggerConfirmJokerEffects(state, scoredState, { triggerMomentum: false });
       allowNextHotDiceOverlayRef.current = scoredState.dice.hotDice;
       const allUnavailable = scoredState.dice.locked.every((locked, index) => locked || scoredState.dice.disabled[index]);
-      const next = rollDice(scoredState, { deferFarkle: getJokerCount(scoredState, "my-bad") > 0 });
+      const deferFarkle = getJokerCount(scoredState, "my-bad") > 0;
+      const next = rollDice(scoredState, { deferFarkle });
       const wakeUpActivated = next.log.some(
         (entry) => !scoredState.log.some((previous) => previous.id === entry.id) && entry.text.startsWith("Wake Up reactivated")
       );
@@ -1224,6 +1426,7 @@ function App() {
           );
       triggerWakeUpActivation(scoredState, next);
       triggerFaustianBargainActivation(scoredState, next);
+      const momentumTriggeredImmediately = triggerMomentumRollActivation(scoredState, next);
 
       setState(scoredState);
       setRollingDiceMask(rollMask);
@@ -1235,9 +1438,9 @@ function App() {
       playUiSound("roll");
       rollTimeoutRef.current = window.setTimeout(() => {
         finishRollAfterAnimation(next, rollMask, {
-          triggerMomentumAfterRoll: true,
           beforeRollCount: scoredState.dice.rollCount,
-          beforeState: scoredState
+          beforeState: scoredState,
+          triggerMomentumOnResolvedRoll: deferFarkle && !momentumTriggeredImmediately
         });
       }, ROLL_ANIMATION_MS);
       return;
@@ -1245,7 +1448,8 @@ function App() {
 
     const beforeRollCount = state.dice.rollCount;
     const allUnavailable = state.dice.locked.every((locked, index) => locked || state.dice.disabled[index]);
-    const next = rollDice(state, { deferFarkle: getJokerCount(state, "my-bad") > 0 });
+    const deferFarkle = getJokerCount(state, "my-bad") > 0;
+    const next = rollDice(state, { deferFarkle });
     const wakeUpActivated = next.log.some(
       (entry) => !state.log.some((previous) => previous.id === entry.id) && entry.text.startsWith("Wake Up reactivated")
     );
@@ -1255,9 +1459,10 @@ function App() {
           (locked, index) =>
             (!state.dice.disabled[index] && (allUnavailable || !locked)) ||
             (state.dice.disabled[index] && !next.dice.disabled[index])
-        );
+    );
     triggerWakeUpActivation(state, next);
     triggerFaustianBargainActivation(state, next);
+    const momentumTriggeredImmediately = triggerMomentumRollActivation(state, next);
 
     setRollingDiceMask(rollMask);
     setRollingDiceValues(
@@ -1268,9 +1473,9 @@ function App() {
     playUiSound("roll");
     rollTimeoutRef.current = window.setTimeout(() => {
       finishRollAfterAnimation(next, rollMask, {
-        triggerMomentumAfterRoll: getJokerCount(state, "momentum") > 0 && state.run.turnScore > 0,
         beforeRollCount,
-        beforeState: state
+        beforeState: state,
+        triggerMomentumOnResolvedRoll: deferFarkle && !momentumTriggeredImmediately
       });
     }, ROLL_ANIMATION_MS);
   };
@@ -1393,7 +1598,8 @@ function App() {
     playUiSound("market-close");
 
     marketTimeoutRef.current = window.setTimeout(() => {
-      const next = nextRound(state);
+      const next = nextRound(stateRef.current);
+      stateRef.current = next;
       if (rollTimeoutRef.current !== null) {
         window.clearTimeout(rollTimeoutRef.current);
       }
@@ -1451,11 +1657,13 @@ function App() {
     const salePrice = Math.floor(joker.price / 2);
     const next = cloneState(state);
     next.jokers.splice(pendingJokerSaleIndex, 1);
+    normalizePortraitCopy(next);
     next.run.money += salePrice;
     next.log.unshift({ id: makeId(), text: `Sold ${joker.name} for $${salePrice}.`, tone: "good" });
     next.updatedAt = Date.now();
 
     setPendingJokerSaleIndex(null);
+    stateRef.current = next;
     setState(next);
     playUiSound("coin");
   };
@@ -1512,7 +1720,7 @@ function App() {
     <main className="shell">
       <section className="score-banner frame">
         <span className="score-label">Score</span>
-        <strong className="score-value">{formatScore(state.run.totalScore)}</strong>
+        <strong className="score-value">{formatScore(displayScore)}</strong>
         <span className="score-side">Round {state.run.round}</span>
       </section>
 
@@ -1583,21 +1791,61 @@ function App() {
 
         <div className="slot-row items-row">
           {itemSlots.map((jokerId, index) => {
-            const jokerImagePath = jokerId ? getJokerImagePath(jokerId) : null;
+            const portraitCopyId = jokerId === "the-portrait" ? activePortraitCopy : null;
+            const jokerImagePath = jokerId ? getJokerImagePath(jokerId, `slot-${index}`) : null;
             const portraitCopiedImagePath =
-              jokerId === "the-portrait" &&
-              state.flags.portraitCopiedJoker &&
-              state.jokers.includes(state.flags.portraitCopiedJoker)
-                ? getJokerImagePath(state.flags.portraitCopiedJoker)
+              portraitCopyId
+                ? getJokerImagePath(portraitCopyId, `portrait-copy-slot-${index}`)
                 : null;
             const jokerArtwork =
               jokerId === "the-portrait" && portraitCopiedImagePath ? (
-                <span className="portrait-joker-stack" aria-hidden="true">
-                  <img className="relic-slot-joker-image portrait-copied-joker-image" src={portraitCopiedImagePath} alt="" draggable={false} />
-                  {jokerImagePath ? <img className="relic-slot-joker-image portrait-frame-joker-image" src={jokerImagePath} alt="" draggable={false} /> : null}
+                <span className="portrait-copy-artwork" aria-hidden="true">
+                  <img
+                    className="relic-slot-joker-image portrait-copied-joker-image portrait-copy-base-image"
+                    src={portraitCopiedImagePath}
+                    alt=""
+                    draggable={false}
+                    onError={(event) =>
+                      logJokerImageLoadFailure(event, {
+                        refId: portraitCopyId,
+                        context: "portrait-copied-joker",
+                        slotIndex: index,
+                        expectedSrc: portraitCopiedImagePath
+                      })
+                    }
+                  />
+                  {jokerImagePath ? (
+                    <img
+                      className="relic-slot-joker-image portrait-frame-joker-image portrait-copy-overlay-image"
+                      src={jokerImagePath}
+                      alt=""
+                      draggable={false}
+                      onError={(event) =>
+                        logJokerImageLoadFailure(event, {
+                          refId: jokerId,
+                          context: "portrait-frame-joker",
+                          slotIndex: index,
+                          expectedSrc: jokerImagePath
+                        })
+                      }
+                    />
+                  ) : null}
                 </span>
               ) : jokerImagePath ? (
-                <img className="relic-slot-joker-image" src={jokerImagePath} alt="" draggable={false} />
+                <img
+                  className="relic-slot-joker-image"
+                  src={jokerImagePath}
+                  alt=""
+                  draggable={false}
+                  onError={(event) =>
+                    logJokerImageLoadFailure(event, {
+                      refId: jokerId,
+                      context: "joker-slot",
+                      slotIndex: index,
+                      expectedSrc: jokerImagePath
+                    })
+                  }
+                />
               ) : null;
             const jokerEffect = jokerId
               ? activeJokerEffects.filter((effect) => effect.jokerId === jokerId).at(-1) ?? null
@@ -1605,15 +1853,28 @@ function App() {
             const jokerName = jokerId ? JOKERS.find((joker) => joker.id === jokerId)?.name ?? "joker" : "joker";
             const salePending = pendingJokerSaleIndex === index && !!jokerId;
             const canSellJoker = marketVisible && !rewardAnimating && !marketLeaving && !pendingJokerSaleId && !!jokerId;
+            const effectiveInactiveJokerId = jokerId === "the-portrait" ? activePortraitCopy : jokerId;
+            const bandAidInactive =
+              !state.run.cleared &&
+              ((jokerId === "band-aid" && state.flags.bandAidUsesRound >= 1) ||
+                (jokerId === "the-portrait" && activePortraitCopy === "band-aid" && state.flags.bandAidUsesRound >= 2));
+            const dualityInactive =
+              (jokerId === "duality" && state.flags.dualityStacks.original <= 0) ||
+              (jokerId === "the-portrait" && activePortraitCopy === "duality" && state.flags.dualityStacks.portrait <= 0);
             const inactive =
-              (jokerId === "band-aid" && state.flags.bandAidUsesRound >= getJokerCount(state, "band-aid") && !state.run.cleared) ||
-              (jokerId === "big-risk" && state.dice.rollCount < 4) ||
-              (jokerId === "double-or-nothing" && state.run.turnNumber !== 1) ||
-              (jokerId === "fever" && state.flags.feverCharges <= 0) ||
-              (jokerId === "overtime" && state.run.turnsLeft !== 1) ||
-              (jokerId === "pocket-change" && (state.dice.rollCount >= 4 || (isRolling && state.dice.rollCount >= 3)));
-            const slotClassName = `board-slot relic-slot ${jokerId ? "filled" : "empty"} ${inactive ? "inactive" : ""} ${jokerEffect ? "joker-effect" : ""} ${salePending ? "sell-pending" : ""} ${canSellJoker ? "sellable" : ""}`;
-            const labelClassName = `joker-effect-label ${jokerId === "greedy" ? "greedy-effect-label" : ""}`;
+              bandAidInactive ||
+              dualityInactive ||
+              (effectiveInactiveJokerId === "big-risk" && state.dice.rollCount < 4) ||
+              (effectiveInactiveJokerId === "double-or-nothing" && state.run.turnNumber !== 1) ||
+              (effectiveInactiveJokerId === "fever" && state.flags.feverCharges <= 0) ||
+              (effectiveInactiveJokerId === "overtime" && state.run.turnsLeft !== 1) ||
+              (effectiveInactiveJokerId === "pocket-change" && (state.dice.rollCount >= 4 || (isRolling && state.dice.rollCount >= 3)));
+            const slotClassName = `board-slot relic-slot ${jokerId ? "filled" : "empty"} ${jokerId === "the-portrait" ? "portrait-slot" : ""} ${portraitCopyId ? "portrait-copy-slot" : ""} ${inactive ? "inactive" : ""} ${jokerEffect ? "joker-effect" : ""} ${salePending ? "sell-pending" : ""} ${canSellJoker ? "sellable" : ""}`;
+            const multiplierLabel =
+              jokerId === "greedy" ||
+              jokerId === "duality" ||
+              (jokerId === "the-portrait" && (activePortraitCopy === "greedy" || activePortraitCopy === "duality"));
+            const labelClassName = `joker-effect-label ${multiplierLabel ? "greedy-effect-label" : ""}`;
             return canSellJoker ? (
               <button
                 key={`item-${index}-${jokerEffect?.key ?? "idle"}`}
@@ -1647,7 +1908,7 @@ function App() {
               <div key={column.label} className="market-column">
                 {column.items.map((item) => {
                   const itemText = getShopItemText(item);
-                  const jokerImagePath = item.kind === "joker" ? getJokerImagePath(item.refId) : null;
+                  const jokerImagePath = item.kind === "joker" ? getJokerImagePath(item.refId, "market-item") : null;
                   const disabled =
                     rewardAnimating ||
                     marketLeaving ||
@@ -1667,7 +1928,19 @@ function App() {
                         <em>${item.price}</em>
                       </span>
                       {jokerImagePath ? (
-                        <img className="market-item-joker-image" src={jokerImagePath} alt="" draggable={false} />
+                        <img
+                          className="market-item-joker-image"
+                          src={jokerImagePath}
+                          alt=""
+                          draggable={false}
+                          onError={(event) =>
+                            logJokerImageLoadFailure(event, {
+                              refId: item.refId,
+                              context: "market-item",
+                              expectedSrc: jokerImagePath
+                            })
+                          }
+                        />
                       ) : item.kind === "die-upgrade" ? (
                         <img className="market-item-die-image" src={DUMMY_DIE_UPGRADE_IMAGE_PATH} alt="" draggable={false} />
                       ) : item.kind === "special-die" ? (

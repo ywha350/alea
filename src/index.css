@@ -70,6 +70,11 @@ body {
   text-rendering: geometricPrecision;
 }
 
+body::before {
+  content: "";
+  display: none;
+}
+
 button {
   font: inherit;
   font-family: var(--font-pixel);
@@ -353,6 +358,26 @@ p {
 
 .portrait-box.boss-tone-blue .boss-sprite {
   filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, 0.48)) sepia(0.18) saturate(1.8) hue-rotate(170deg) brightness(1.04);
+}
+
+.portrait-box.boss-tone-red .boss-sprite {
+  filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, 0.48)) sepia(0.25) saturate(2.1) hue-rotate(315deg) brightness(1.03);
+}
+
+.portrait-box.boss-tone-green .boss-sprite {
+  filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, 0.48)) sepia(0.3) saturate(1.8) hue-rotate(70deg) brightness(1.02);
+}
+
+.portrait-box.boss-tone-purple .boss-sprite {
+  filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, 0.48)) sepia(0.2) saturate(1.9) hue-rotate(235deg) brightness(1.04);
+}
+
+.portrait-box.boss-tone-gold .boss-sprite {
+  filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, 0.48)) sepia(0.45) saturate(1.7) hue-rotate(8deg) brightness(1.08);
+}
+
+.portrait-box.boss-tone-ashen .boss-sprite {
+  filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, 0.48)) grayscale(0.75) sepia(0.12) saturate(0.8) brightness(0.96) contrast(1.08);
 }
 
 .portrait-box.hit .boss-sprite {
@@ -1204,25 +1229,30 @@ img.market-item-die-image {
   filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.58));
 }
 
-.portrait-joker-stack {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: 100%;
+.relic-slot.portrait-copy-slot {
+  overflow: hidden;
 }
 
-.portrait-joker-stack .relic-slot-joker-image {
+.portrait-copy-artwork {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.portrait-copy-artwork .relic-slot-joker-image {
   position: absolute;
   inset: 0;
 }
 
 .portrait-copied-joker-image {
-  opacity: 0.8;
-  filter: brightness(0.8) drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.58));
+  z-index: 0;
+  opacity: 1;
+  filter: brightness(0.86) saturate(0.92) drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.58));
 }
 
 .portrait-frame-joker-image {
   z-index: 1;
+  pointer-events: none;
 }
 
 .joker-sale-confirm {
@@ -1717,5 +1747,29 @@ img.market-item-die-image {
   .dice-row {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 4px;
+  }
+}
+
+@media (orientation: landscape) and (hover: none) and (pointer: coarse) {
+  body::before {
+    content: "세로 방향으로 돌려주세요";
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background:
+      radial-gradient(circle at 50% 38%, rgba(232, 180, 92, 0.16), transparent 32%),
+      linear-gradient(180deg, #241910 0%, #090b08 100%);
+    color: var(--gold);
+    font-size: clamp(1.45rem, 7vw, 2.6rem);
+    line-height: 1.2;
+    text-align: center;
+    text-shadow: 3px 3px 0 #000;
+  }
+
+  #root {
+    visibility: hidden;
   }
 }

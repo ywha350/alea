@@ -23,6 +23,8 @@ export type JokerId =
   | "investment"
   | "golden-ratio"
   | "the-portrait"
+  | "odd-choice"
+  | "duality"
   | "wake-up"
   | "faustian-bargain";
 
@@ -44,6 +46,8 @@ export type BossId =
   | "bitter-five"
   | "heavy-bones"
   | "poor-house";
+
+export type BossTone = "base" | "blue" | "red" | "green" | "purple" | "gold" | "ashen";
 
 export interface JokerDefinition {
   id: JokerId;
@@ -81,6 +85,7 @@ export interface RunState {
   gameOver: boolean;
   cleared: boolean;
   currentBoss: BossId | null;
+  currentBossTone: BossTone;
   bossDescriptionIndex: number;
   lastRewardBreakdown: RewardBreakdownItem[];
 }
@@ -147,6 +152,10 @@ export interface SaveData {
     successfulScoresThisTurn: number;
     hadFarkleRound: boolean;
     portraitCopiedJoker: JokerId | null;
+    dualityStacks: {
+      original: number;
+      portrait: number;
+    };
   };
 }
 

@@ -176,17 +176,31 @@ export const JOKERS: JokerDefinition[] = [
     price: 5
   },
   {
+    id: "odd-choice",
+    name: "Odd Choice",
+    type: "Flat score",
+    description: "3s can now score alone.",
+    price: 5
+  },
+  {
+    id: "duality",
+    name: "Duality",
+    type: "Farkle multiplier",
+    description: "Farkle adds x2. Resets on Bank.",
+    price: 5
+  },
+  {
     id: "wake-up",
     name: "Wake Up",
     type: "Recovery",
-    description: "15% chance to reactivate all dice.",
+    description: "15% chance of activating all dice.",
     price: 5
   },
   {
     id: "faustian-bargain",
     name: "Bargain",
     type: "Turn economy",
-    description: "7% chance to spend $1 and gain +1 turn.",
+    description: "7% chance of -$1 and +1 turn.",
     price: 5
   }
 ];

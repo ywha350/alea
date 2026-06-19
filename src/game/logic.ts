@@ -1,5 +1,6 @@
 import type {
   BossId,
+  BossTone,
   DiceState,
   JokerId,
   LogEntry,
@@ -30,12 +31,13 @@ function randomScoringDiceValues(
   _boss: BossId | null,
   discount: boolean,
   holdEm = false,
+  oddChoice = false,
   activeMask: boolean[] = Array(6).fill(true)
 ): number[] {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const values = randomDiceValues();
     const active = values.filter((_, index) => activeMask[index]);
-    if (hasAnyScoringDice(active, null, discount, holdEm)) {
+    if (hasAnyScoringDice(active, null, discount, holdEm, oddChoice)) {
       return values;
     }
   }
@@ -54,12 +56,38 @@ function makeLog(text: string, tone: LogEntry["tone"] = "neutral"): LogEntry {
 
 export function getJokerCount(state: SaveData, jokerId: JokerId): number {
   const ownedCount = state.jokers.includes(jokerId) ? 1 : 0;
-  const copiedCount = state.flags.portraitCopiedJoker === jokerId ? 1 : 0;
+  const copiedCount = getActivePortraitCopy(state) === jokerId ? 1 : 0;
   return ownedCount + copiedCount;
 }
 
 function hasJoker(state: SaveData, jokerId: JokerId): boolean {
   return getJokerCount(state, jokerId) > 0;
+}
+
+function hasOwnedJoker(state: SaveData, jokerId: JokerId): boolean {
+  return state.jokers.includes(jokerId);
+}
+
+export function getActivePortraitCopy(state: SaveData): JokerId | null {
+  const copiedJoker = state.flags.portraitCopiedJoker;
+  if (
+    !copiedJoker ||
+    copiedJoker === "the-portrait" ||
+    !state.jokers.includes("the-portrait") ||
+    !state.jokers.includes(copiedJoker)
+  ) {
+    return null;
+  }
+
+  return copiedJoker;
+}
+
+export function normalizePortraitCopy(state: SaveData): SaveData {
+  if (state.flags.portraitCopiedJoker && !getActivePortraitCopy(state)) {
+    state.flags.portraitCopiedJoker = null;
+  }
+
+  return state;
 }
 
 function choosePortraitCopy(state: SaveData): JokerId | null {
@@ -184,7 +212,7 @@ function snakeEyesBonusScore(
   }
 
   const oneIndices = selectedIndices.filter((die) => die.value === 1).map((die) => die.index);
-  if (oneIndices.length < 2) {
+  if (oneIndices.length !== 2) {
     return 0;
   }
 
@@ -210,17 +238,32 @@ export function getTargetForRound(round: number): number {
   return Math.round(TARGETS[TARGETS.length - 1] * 1.35 ** overflow);
 }
 
+const BOSS_CYCLE: BossId[] = [
+  "bone-croupier",
+  "broken-cup",
+  "dry-table",
+  "tax-collector",
+  "bitter-five",
+  "heavy-bones",
+  "poor-house"
+];
+const BOSS_TONES: BossTone[] = ["base", "blue", "red", "green", "purple", "gold", "ashen"];
+const RANDOM_BOSS_TONES: BossTone[] = ["red", "green", "purple", "gold", "ashen"];
+
 export function getBossForRound(round: number): BossId | null {
-  const bossCycle: BossId[] = [
-    "bone-croupier",
-    "broken-cup",
-    "dry-table",
-    "tax-collector",
-    "bitter-five",
-    "heavy-bones",
-    "poor-house"
-  ];
-  return bossCycle[Math.floor((round - 1) / 2) % bossCycle.length];
+  if (round <= BOSS_CYCLE.length * 2) {
+    return BOSS_CYCLE[Math.floor((round - 1) / 2)];
+  }
+
+  return BOSS_CYCLE[Math.floor(Math.random() * BOSS_CYCLE.length)];
+}
+
+export function getBossToneForRound(round: number): BossTone {
+  if (round <= BOSS_CYCLE.length * 2) {
+    return (round - 1) % 2 === 1 ? "blue" : "base";
+  }
+
+  return RANDOM_BOSS_TONES[Math.floor(Math.random() * RANDOM_BOSS_TONES.length)];
 }
 
 function randomBossDescriptionIndex(boss: BossId | null): number {
@@ -233,9 +276,14 @@ function validBossDescriptionIndex(boss: BossId | null, index: number | undefine
     : randomBossDescriptionIndex(boss);
 }
 
+function validBossTone(tone: BossTone | undefined, round: number): BossTone {
+  return tone && BOSS_TONES.includes(tone) ? tone : getBossToneForRound(round);
+}
+
 export function createInitialState(): SaveData {
   const now = Date.now();
   const currentBoss = getBossForRound(1);
+  const currentBossTone = getBossToneForRound(1);
   return {
     version: SAVE_VERSION,
     createdAt: now,
@@ -253,6 +301,7 @@ export function createInitialState(): SaveData {
       gameOver: false,
       cleared: false,
       currentBoss,
+      currentBossTone,
       bossDescriptionIndex: randomBossDescriptionIndex(currentBoss),
       lastRewardBreakdown: []
     },
@@ -287,7 +336,11 @@ export function createInitialState(): SaveData {
       feverCharges: 0,
       successfulScoresThisTurn: 0,
       hadFarkleRound: false,
-      portraitCopiedJoker: null
+      portraitCopiedJoker: null,
+      dualityStacks: {
+        original: 0,
+        portrait: 0
+      }
     }
   };
 }
@@ -299,8 +352,9 @@ export function migrateSave(save: SaveData | null): SaveData {
 
   const initial = createInitialState();
   const currentBoss = save.run.currentBoss ?? initial.run.currentBoss;
+  const savedRun = save.run as Partial<SaveData["run"]>;
   const legacyFlags = save.flags as Partial<SaveData["flags"]> & { bandAidUsedRound?: boolean };
-  return {
+  return normalizePortraitCopy({
     ...createInitialState(),
     ...save,
     upgrades: {
@@ -319,6 +373,7 @@ export function migrateSave(save: SaveData | null): SaveData {
       ...initial.run,
       ...save.run,
       totalScore: save.run.totalScore ?? save.run.roundScore ?? initial.run.totalScore,
+      currentBossTone: validBossTone(savedRun.currentBossTone, save.run.round ?? initial.run.round),
       bossDescriptionIndex: validBossDescriptionIndex(currentBoss, save.run.bossDescriptionIndex),
       lastRewardBreakdown: save.run.lastRewardBreakdown ?? initial.run.lastRewardBreakdown
     },
@@ -328,11 +383,15 @@ export function migrateSave(save: SaveData | null): SaveData {
       bandAidUsesRound:
         save.flags.bandAidUsesRound ??
         (legacyFlags.bandAidUsedRound ? 1 : 0),
-      portraitCopiedJoker: save.flags.portraitCopiedJoker ?? initial.flags.portraitCopiedJoker
+      portraitCopiedJoker: save.flags.portraitCopiedJoker ?? initial.flags.portraitCopiedJoker,
+      dualityStacks: {
+        ...initial.flags.dualityStacks,
+        ...save.flags.dualityStacks
+      }
     },
     version: SAVE_VERSION,
     updatedAt: Date.now()
-  };
+  });
 }
 
 export function getScoringIndices(
@@ -341,7 +400,8 @@ export function getScoringIndices(
   _boss: BossId | null = null,
   discount = false,
   disabled: boolean[] = [],
-  holdEm = false
+  holdEm = false,
+  oddChoice = false
 ): Set<number> {
   const indices = new Set<number>();
   const active = values.filter((_, index) => !locked[index] && !disabled[index]);
@@ -364,7 +424,7 @@ export function getScoringIndices(
     if (locked[index] || disabled[index]) {
       return;
     }
-    if (value === 1 || value === 5 || counts[value] >= 3) {
+    if (value === 1 || value === 5 || (oddChoice && value === 3) || counts[value] >= 3) {
       indices.add(index);
     }
   });
@@ -378,7 +438,13 @@ export function getScoringIndices(
   return indices;
 }
 
-export function hasAnyScoringDice(values: number[], _boss: BossId | null = null, discount = false, holdEm = false): boolean {
+export function hasAnyScoringDice(
+  values: number[],
+  _boss: BossId | null = null,
+  discount = false,
+  holdEm = false,
+  oddChoice = false
+): boolean {
   if (
     (values.length === 6 && (straightScore(values, discount) > 0 || threePairsScore(values) > 0)) ||
     straightScore(values, discount) > 0 ||
@@ -393,7 +459,7 @@ export function hasAnyScoringDice(values: number[], _boss: BossId | null = null,
   const counts = countsFor(values);
   return counts.some(
     (count, value) =>
-      count > 0 && (count >= 3 || value === 1 || value === 5)
+      count > 0 && (count >= 3 || value === 1 || value === 5 || (oddChoice && value === 3))
   );
 }
 
@@ -407,14 +473,19 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   }
 
   const discountStraight = hasJoker(state, "discount");
-  const copiedDiscount = state.flags.portraitCopiedJoker === "discount";
-  const copiedHoldEm = state.flags.portraitCopiedJoker === "hold-em";
+  const oddChoiceCount = getJokerCount(state, "odd-choice");
+  const activePortraitCopy = getActivePortraitCopy(state);
+  const copiedDiscount = activePortraitCopy === "discount";
+  const copiedHoldEm = activePortraitCopy === "hold-em";
   const counts = countsFor(selectedValues);
   let score = 0;
   const labels: string[] = [];
   let flatBonus = 0;
   let singleOneScoreAlreadyCounted = 0;
   const dieFaceBonusAppliedIndices = new Set<number>();
+  const singleOneScore = 100;
+  const singleOneFaceBonus = state.upgrades.dieFaceBonuses[1] ?? 0;
+  const singleOneUpgradeMultiplier = getValuesUpgradeMultiplier(state.upgrades, [1]);
 
   const straight = selectedValues.length === 6 || discountStraight ? straightScore(selectedValues, discountStraight) : 0;
   const threePairs = selectedValues.length === 6 ? threePairsScore(selectedValues) : 0;
@@ -458,17 +529,14 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
       }
     }
 
-    const singleOneScore = 100;
     const singleOneIndices = selectedIndices
       .filter((die) => die.value === 1)
       .slice(0, counts[1])
       .map((die) => die.index);
     singleOneScoreAlreadyCounted = singleOneIndices.reduce((sum, index) => {
       dieFaceBonusAppliedIndices.add(index);
-      const faceBonus = state.upgrades.dieFaceBonuses[1] ?? 0;
       const bullseyeMultiplier = state.dice.types[index] === "bullseye" ? 3 : 1;
-      const upgradeMultiplier = getValuesUpgradeMultiplier(state.upgrades, [1]);
-      return sum + Math.round((singleOneScore + faceBonus) * bullseyeMultiplier * upgradeMultiplier);
+      return sum + Math.round((singleOneScore + singleOneFaceBonus) * bullseyeMultiplier * singleOneUpgradeMultiplier);
     }, 0);
     score += singleOneScoreAlreadyCounted;
     if (counts[1] > 0) {
@@ -490,9 +558,43 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
       counts[5] = 0;
     }
 
+    if (oddChoiceCount > 0 && counts[3] > 0) {
+      const singleThreeScore = 100 * oddChoiceCount;
+      const singleThreeIndices = selectedIndices
+        .filter((die) => die.value === 3)
+        .slice(0, counts[3])
+        .map((die) => die.index);
+      score += singleThreeIndices.reduce((sum, index) => {
+        dieFaceBonusAppliedIndices.add(index);
+        return (
+          sum +
+          Math.round(
+            (singleThreeScore + (state.upgrades.dieFaceBonuses[3] ?? 0)) *
+              getValuesUpgradeMultiplier(state.upgrades, [3])
+          )
+        );
+      }, 0);
+      labels.push(`${counts[3]} three${counts[3] > 1 ? "s" : ""}`);
+      counts[3] = 0;
+    }
+
     if (counts.some((count) => count > 0)) {
       return { valid: false, score: 0, label: "Invalid selection", multiplier: 1, flatBonus: 0 };
     }
+  }
+
+  const bullseyeComboBonus = selectedIndices.reduce((sum, die) => {
+    if (die.value !== 1 || state.dice.types[die.index] !== "bullseye" || dieFaceBonusAppliedIndices.has(die.index)) {
+      return sum;
+    }
+
+    const normalSingleOneScore = Math.round((singleOneScore + singleOneFaceBonus) * singleOneUpgradeMultiplier);
+    const bullseyeSingleOneScore = Math.round((singleOneScore + singleOneFaceBonus) * 3 * singleOneUpgradeMultiplier);
+    return sum + bullseyeSingleOneScore - normalSingleOneScore;
+  }, 0);
+  if (bullseyeComboBonus > 0) {
+    score += bullseyeComboBonus;
+    labels.push("Bull's Eye");
   }
 
   score += flatBonus;
@@ -536,6 +638,12 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   if (doubleOrNothingCount > 0 && state.run.turnNumber === 1) {
     multiplier *= 2 ** doubleOrNothingCount;
   }
+  if (hasOwnedJoker(state, "duality") && state.flags.dualityStacks.original > 0) {
+    multiplier *= 2 ** state.flags.dualityStacks.original;
+  }
+  if (getActivePortraitCopy(state) === "duality" && state.flags.dualityStacks.portrait > 0) {
+    multiplier *= 2 ** state.flags.dualityStacks.portrait;
+  }
 
   return {
     valid: true,
@@ -558,7 +666,10 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
     next.run.turnScore = Math.round(next.run.turnScore * 1.2 ** momentumCount);
   }
 
-  tryWakeUp(next);
+  const startsHotDiceRoll = next.dice.hotDice && next.dice.locked.every((locked, index) => locked || next.dice.disabled[index]);
+  if (!startsHotDiceRoll) {
+    tryWakeUp(next);
+  }
   tryFaustianBargain(next);
 
   const allLocked = next.dice.locked.every((locked, index) => locked || next.dice.disabled[index]);
@@ -575,6 +686,7 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
         next.run.currentBoss,
         hasJoker(next, "discount"),
         hasJoker(next, "hold-em"),
+        hasJoker(next, "odd-choice"),
         next.dice.disabled.map((disabled) => !disabled)
       )
     : next.dice.values.map((value, index) =>
@@ -588,7 +700,7 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
   const active = activeValues(next.dice);
   if (
     !options.deferFarkle &&
-    !hasAnyScoringDice(active, null, hasJoker(next, "discount"), hasJoker(next, "hold-em"))
+    !hasAnyScoringDice(active, null, hasJoker(next, "discount"), hasJoker(next, "hold-em"), hasJoker(next, "odd-choice"))
   ) {
     return handleFarkle(next);
   }
@@ -609,7 +721,8 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
     next.run.currentBoss,
     hasJoker(next, "discount"),
     next.dice.disabled,
-    hasJoker(next, "hold-em")
+    hasJoker(next, "hold-em"),
+    hasJoker(next, "odd-choice")
   );
   if (!scoringIndices.has(index)) {
     return next;
@@ -618,13 +731,16 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
   const active = activeValues(next.dice);
   const counts = countsFor(active);
   const clickedValue = next.dice.values[index];
+  const clickedValueScoresAlone =
+    clickedValue === 1 ||
+    clickedValue === 5 ||
+    (hasJoker(next, "odd-choice") && clickedValue === 3);
   const wholeHandScore =
     straightScore(active, hasJoker(next, "discount")) > 0 ||
     (hasJoker(next, "hold-em") && active.length === 5 && fullHouseScore(active) > 0);
   const pairOnlyScore =
     ((active.length === 6 && threePairsScore(active) > 0) || (hasJoker(next, "hold-em") && hasTwoPairs(active))) &&
-    clickedValue !== 1 &&
-    clickedValue !== 5 &&
+    !clickedValueScoresAlone &&
     counts[clickedValue] === 2;
 
   if (wholeHandScore || pairOnlyScore) {
@@ -645,7 +761,7 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
     return next;
   }
 
-  const kindOnlyScore = clickedValue !== 1 && clickedValue !== 5 && counts[clickedValue] >= 3;
+  const kindOnlyScore = !clickedValueScoresAlone && counts[clickedValue] >= 3;
   if (kindOnlyScore) {
     const matchingIndices = next.dice.values
       .map((value, diceIndex) => ({ value, diceIndex }))
@@ -670,7 +786,6 @@ export function confirmSelection(state: SaveData): SaveData {
   }
 
   const activeBeforeSelection = activeValues(next.dice).length;
-  const consumedFever = next.flags.feverCharges > 0;
   const hotDiceTriggered = next.dice.selected.every((selected, index) => selected || next.dice.locked[index] || next.dice.disabled[index]);
   const bloodyCount = next.dice.selected.filter((selected, index) => selected && next.dice.types[index] === "bloody").length;
 
@@ -692,7 +807,7 @@ export function confirmSelection(state: SaveData): SaveData {
   if (hotDiceTriggered) {
     const feverCount = getJokerCount(next, "fever");
     if (feverCount > 0) {
-      next.flags.feverCharges = Math.min(3, next.flags.feverCharges + feverCount);
+      next.flags.feverCharges = Math.min(3, feverCount);
     }
     const cleanSweepCount = getJokerCount(next, "clean-sweep");
     if (cleanSweepCount > 0) {
@@ -719,9 +834,6 @@ export function confirmSelection(state: SaveData): SaveData {
   next.flags.successfulScoresThisTurn += 1;
   next.dice.awaitingAction = false;
   next.updatedAt = Date.now();
-  if (consumedFever && !hotDiceTriggered) {
-    next.flags.feverCharges -= 1;
-  }
   return next;
 }
 
@@ -731,7 +843,13 @@ function startNextTurn(state: SaveData, awaitingAction = false): SaveData {
   const disabled = previousTypes.map((type, index) => type === "glass" && previousDisabled[index]);
   state.dice = {
     values: awaitingAction
-      ? randomScoringDiceValues(state.run.currentBoss, hasJoker(state, "discount"), hasJoker(state, "hold-em"), disabled.map((isDisabled) => !isDisabled))
+      ? randomScoringDiceValues(
+          state.run.currentBoss,
+          hasJoker(state, "discount"),
+          hasJoker(state, "hold-em"),
+          hasJoker(state, "odd-choice"),
+          disabled.map((isDisabled) => !isDisabled)
+        )
       : randomDiceValues(),
     selected: Array(6).fill(false),
     locked: Array(6).fill(false),
@@ -835,6 +953,8 @@ export function bankScore(state: SaveData): SaveData {
   if (hasJoker(next, "pocket-change") && next.dice.rollCount <= 3) {
     next.run.money += getJokerCount(next, "pocket-change");
   }
+  next.flags.dualityStacks.original = 0;
+  next.flags.dualityStacks.portrait = 0;
   next.run.turnsLeft -= 1;
   next.run.turnNumber += 1;
   next.log.unshift(makeLog(`Banked ${banked}. Round total ${next.run.roundScore}.`, "good"));
@@ -892,6 +1012,12 @@ export function handleFarkle(state: SaveData): SaveData {
   }
 
   next.flags.hadFarkleRound = true;
+  if (hasOwnedJoker(next, "duality")) {
+    next.flags.dualityStacks.original += 1;
+  }
+  if (getActivePortraitCopy(next) === "duality") {
+    next.flags.dualityStacks.portrait += 1;
+  }
   next.run.turnScore = 0;
   next.dice.selected.fill(false);
   next.dice.locked.fill(false);
@@ -928,10 +1054,6 @@ export function generateShop(state: SaveData): ShopItem[] {
   const unavailableJokers = new Set<JokerId>(["lucky-cash", "tax-refund", "just-one-more"]);
   const availableJokers = JOKERS.filter((joker) => !unavailableJokers.has(joker.id) && !state.jokers.includes(joker.id));
   const shuffledJokers = [...availableJokers].sort(() => Math.random() - 0.5).slice(0, 2);
-  const portraitJoker = availableJokers.find((joker) => joker.id === "the-portrait");
-  if (state.run.round === 1 && portraitJoker && !shuffledJokers.some((joker) => joker.id === "the-portrait")) {
-    shuffledJokers[0] = portraitJoker;
-  }
   const handUpgrades = [...UPGRADES].sort(() => Math.random() - 0.5).slice(0, 2);
   const specialDice = [...SPECIAL_DICE].sort(() => Math.random() - 0.5).slice(0, 2);
 
@@ -1046,6 +1168,9 @@ export function nextRound(state: SaveData): SaveData {
   }
 
   next.flags.portraitCopiedJoker = choosePortraitCopy(next);
+  const portraitCopyName = next.flags.portraitCopiedJoker
+    ? JOKERS.find((joker) => joker.id === next.flags.portraitCopiedJoker)?.name ?? next.flags.portraitCopiedJoker
+    : null;
   next.run.round += 1;
   next.run.targetScore = getTargetForRound(next.run.round);
   next.run.roundScore = 0;
@@ -1055,6 +1180,7 @@ export function nextRound(state: SaveData): SaveData {
   next.run.cleared = false;
   next.run.lastRewardBreakdown = [];
   next.run.currentBoss = getBossForRound(next.run.round);
+  next.run.currentBossTone = getBossToneForRound(next.run.round);
   next.run.bossDescriptionIndex = randomBossDescriptionIndex(next.run.currentBoss);
   next.shop.open = false;
   next.shop.items = [];
@@ -1072,6 +1198,9 @@ export function nextRound(state: SaveData): SaveData {
       "neutral"
     )
   );
+  if (portraitCopyName) {
+    next.log.unshift(makeLog(`The Portrait copied ${portraitCopyName}.`, "good"));
+  }
   next.updatedAt = Date.now();
   return next;
 }
