@@ -15,20 +15,6 @@ const blockedNavigationKeys = new Set([
   "PageUp"
 ]);
 
-const lockPortraitOrientation = () => {
-  const orientation = screen.orientation as ScreenOrientation & {
-    lock?: (orientation: "portrait-primary") => Promise<void>;
-  };
-
-  if (!orientation.lock) {
-    return;
-  }
-
-  void orientation.lock("portrait-primary").catch(() => {
-    // Some mobile browsers only allow orientation lock for installed/fullscreen apps.
-  });
-};
-
 window.addEventListener("wheel", (event) => event.preventDefault(), { passive: false });
 window.addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
 window.addEventListener("keydown", (event) => {
@@ -41,9 +27,7 @@ window.addEventListener("keydown", (event) => {
 });
 
 void initializeUiAudio();
-lockPortraitOrientation();
 window.addEventListener("pointerdown", unlockUiAudio, { passive: true });
-window.addEventListener("pointerdown", lockPortraitOrientation, { passive: true });
 window.addEventListener("keydown", unlockUiAudio);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {

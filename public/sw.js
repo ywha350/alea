@@ -3,9 +3,7 @@ const BASE_URL = new URL(self.registration.scope).pathname;
 const APP_SHELL = [
   BASE_URL,
   `${BASE_URL}manifest.webmanifest`,
-  `${BASE_URL}main%20icon.png`,
-  `${BASE_URL}icon-192.png`,
-  `${BASE_URL}icon-512.png`
+  `${BASE_URL}icon_new.png`
 ];
 
 self.addEventListener("install", (event) => {

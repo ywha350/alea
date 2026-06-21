@@ -15,6 +15,7 @@ import {
   createInitialState,
   finishFarkleTurn,
   getFaceUpgradeLevel,
+  getFaceUpgradePrice,
   getFaceUpgradeScale,
   getActivePortraitCopy,
   getGreedyMultiplier,
@@ -25,6 +26,7 @@ import {
   getUpgradeFace,
   normalizePortraitCopy,
   nextRound,
+  rerollSingleDieValue,
   rollDice,
   toggleDieSelection
 } from "./game/logic";
@@ -44,6 +46,10 @@ const BOSS_DEATH_SEQUENCE_MS = 620;
 const REWARD_LABEL_MS = 1060;
 const REWARD_STEP_MS = 460;
 const GAME_OVER_DELAY_MS = 500;
+const BASIC_DIE_IMAGE_PATH = assetPath("/dice-basic.png");
+const FORESIGHT_DIE_IMAGE_PATHS = Array.from({ length: 6 }, (_, index) =>
+  assetPath(`/dice-foresight-${index + 1}.png`)
+);
 
 interface HomeRecords {
   bestScore: number;
@@ -102,18 +108,44 @@ function formatDelta(value: number): string {
   return `${value > 0 ? "+" : ""}${formatScore(value)}`;
 }
 
+function formatGreedyMultiplierLabel(multiplier: number): string {
+  if (multiplier >= 100) {
+    return `${Math.floor(multiplier)}`.slice(0, 3);
+  }
+  if (multiplier >= 10) {
+    return `${Math.floor(multiplier)}`;
+  }
+  return `x${multiplier.toFixed(1)}`;
+}
+
+function isFixedAnchorDie(state: SaveData, index: number): boolean {
+  return state.dice.types[index] === "anchor" && state.dice.anchorFixed?.[index] === true;
+}
+
 function randomDisplayDie(): number {
   return Math.floor(Math.random() * 6) + 1;
 }
 
 function getDieImagePath(refId: string): string {
   if (refId === "basic") {
-    return assetPath("/dice-basic.png");
+    return BASIC_DIE_IMAGE_PATH;
   }
-  return SPECIAL_DICE.find((die) => die.id === refId)?.image ?? assetPath("/dice-basic.png");
+  return SPECIAL_DICE.find((die) => die.id === refId)?.image ?? BASIC_DIE_IMAGE_PATH;
 }
 
-function dieSpriteStyle(value: number, imagePath = assetPath("/dice-basic.png")): CSSProperties {
+function getBoardDieImagePath(state: SaveData, index: number): string {
+  const type = state.dice.types[index];
+  if (type === "glass" && state.dice.disabled[index]) {
+    return assetPath("/dice-glass-broken.png");
+  }
+  if (type === "foresight") {
+    const nextValue = state.dice.foresightNext?.[index] ?? null;
+    return nextValue === null ? BASIC_DIE_IMAGE_PATH : FORESIGHT_DIE_IMAGE_PATHS[nextValue - 1] ?? BASIC_DIE_IMAGE_PATH;
+  }
+  return getDieImagePath(type);
+}
+
+function dieSpriteStyle(value: number, imagePath = BASIC_DIE_IMAGE_PATH): CSSProperties {
   const normalized = Math.max(1, Math.min(6, value)) - 1;
   const column = normalized % 3;
   const row = Math.floor(normalized / 3);
@@ -381,7 +413,7 @@ function App() {
   const selectedPreviewTurnScore = state.run.turnScore + (hasSelectedScore ? breakdown.score : 0);
   const bloodyPreviewTurnScore =
     selectedBloodyCount > 0
-      ? Math.round(selectedPreviewTurnScore * 1.2 ** selectedBloodyCount)
+      ? Math.round(selectedPreviewTurnScore * 1.5 ** selectedBloodyCount)
       : selectedPreviewTurnScore;
   const rawPreviewTurnScore =
     getJokerCount(state, "sparta") > 0 && activeDiceCount === 1 && hasSelectedScore
@@ -435,7 +467,7 @@ function App() {
     (state.dice.awaitingAction && !hasSelectedScore);
   const attackDisabled = isRolling || isMyBadRerollPending || farkleResolving || !attackCanBank;
   const displayedDiceValues = isRolling && rollingDiceValues.length === state.dice.values.length
-    ? rollingDiceValues
+    ? rollingDiceValues.map((value, index) => (rollingDiceMask[index] ? value : state.dice.values[index]))
     : state.dice.values;
   const currentTurnLimit = TURN_LIMIT + getJokerCount(state, "deal");
   const displayedTurnCount = marketVisible ? currentTurnLimit : Math.max(0, displayTurns - 1);
@@ -588,6 +620,13 @@ function App() {
       triggerEffectiveJokerEffect("insurance");
     }
   };
+
+  useEffect(() => {
+    FORESIGHT_DIE_IMAGE_PATHS.forEach((src) => {
+      const image = new Image();
+      image.src = src;
+    });
+  }, []);
 
   useEffect(() => {
     stateRef.current = state;
@@ -1236,7 +1275,7 @@ function App() {
       }
       if (state.dice.rollCount > 1) {
         const greedyMultiplier = getGreedyMultiplier(state.dice.rollCount);
-        triggerEffectiveJokerEffect("greedy", `x${greedyMultiplier.toFixed(1)}`);
+        triggerEffectiveJokerEffect("greedy", formatGreedyMultiplierLabel(greedyMultiplier));
       }
       if (selectedMoreDice && state.jokers.includes("duality") && state.flags.dualityStacks.original > 0) {
         triggerJokerEffect("duality", getDualityMultiplierLabel(state.flags.dualityStacks.original));
@@ -1374,8 +1413,7 @@ function App() {
       const rerollIndex = nonScoringIndices[Math.floor(Math.random() * nonScoringIndices.length)];
       const [animationJokerId, ...nextAnimations] = remainingAnimations;
       triggerJokerEffect(animationJokerId);
-      const rerolledState = cloneState(current);
-      rerolledState.dice.values[rerollIndex] = randomDisplayDie();
+      const rerolledState = rerollSingleDieValue(current, rerollIndex);
       rerolledState.log.unshift({ id: makeId(), text: `My bad rerolled die ${rerollIndex + 1}.`, tone: "good" });
       rerolledState.updatedAt = Date.now();
 
@@ -1424,14 +1462,15 @@ function App() {
               (!scoredState.dice.disabled[index] && (allUnavailable || !locked)) ||
               (scoredState.dice.disabled[index] && !next.dice.disabled[index])
           );
+      const visibleRollMask = rollMask.map((rolling, index) => rolling && !isFixedAnchorDie(scoredState, index));
       triggerWakeUpActivation(scoredState, next);
       triggerFaustianBargainActivation(scoredState, next);
       const momentumTriggeredImmediately = triggerMomentumRollActivation(scoredState, next);
 
       setState(scoredState);
-      setRollingDiceMask(rollMask);
+      setRollingDiceMask(visibleRollMask);
       setRollingDiceValues(
-        scoredState.dice.values.map((value, index) => (rollMask[index] ? randomDisplayDie() : value))
+        scoredState.dice.values.map((value, index) => (visibleRollMask[index] ? randomDisplayDie() : value))
       );
       setIsRolling(true);
       playUiSound("click");
@@ -1460,13 +1499,14 @@ function App() {
             (!state.dice.disabled[index] && (allUnavailable || !locked)) ||
             (state.dice.disabled[index] && !next.dice.disabled[index])
     );
+    const visibleRollMask = rollMask.map((rolling, index) => rolling && !isFixedAnchorDie(state, index));
     triggerWakeUpActivation(state, next);
     triggerFaustianBargainActivation(state, next);
     const momentumTriggeredImmediately = triggerMomentumRollActivation(state, next);
 
-    setRollingDiceMask(rollMask);
+    setRollingDiceMask(visibleRollMask);
     setRollingDiceValues(
-      state.dice.values.map((value, index) => (rollMask[index] ? randomDisplayDie() : value))
+      state.dice.values.map((value, index) => (visibleRollMask[index] ? randomDisplayDie() : value))
     );
     setIsRolling(true);
     playUiSound("click");
@@ -1909,12 +1949,14 @@ function App() {
                 {column.items.map((item) => {
                   const itemText = getShopItemText(item);
                   const jokerImagePath = item.kind === "joker" ? getJokerImagePath(item.refId, "market-item") : null;
+                  const itemPrice =
+                    item.kind === "hand-upgrade" ? getFaceUpgradePrice(state.upgrades, item.refId as UpgradeId) : item.price;
                   const disabled =
                     rewardAnimating ||
                     marketLeaving ||
                     !!pendingJokerSaleId ||
                     item.purchased ||
-                    state.run.money < item.price ||
+                    state.run.money < itemPrice ||
                     (item.kind === "joker" && state.jokers.length >= 6);
                   return (
                     <button
@@ -1925,7 +1967,7 @@ function App() {
                     >
                       <span className="market-item-head">
                         <strong>{itemText.name}</strong>
-                        <em>${item.price}</em>
+                        <em>${itemPrice}</em>
                       </span>
                       {jokerImagePath ? (
                         <img
@@ -1967,6 +2009,11 @@ function App() {
           </div>
         ) : (
         <div className={`slot-row dice-row ${farkleFlash ? "farkle-flash" : ""} ${choosingDieUpgrade ? "choosing-upgrade" : ""}`}>
+          {choosingDieUpgrade ? (
+            <div className="hot-dice-overlay choose-die-overlay" aria-live="polite">
+              Select a die
+            </div>
+          ) : null}
           {!choosingDieUpgrade && !marketOpen && hotDiceOverlayId ? (
             <div key={hotDiceOverlayId} className="hot-dice-overlay" aria-live="polite">
               Hot Dice!
@@ -1992,10 +2039,7 @@ function App() {
             const scoring = canSelectScoringDice && scoringIndices.has(index);
             const dieDeltaPopups = damageDeltaPopups.filter((popup) => popup.dieIndex === index);
             const pressing = diePressPulses.some((pulse) => pulse.dieIndex === index);
-            const dieImagePath =
-              state.dice.types[index] === "glass" && state.dice.disabled[index]
-                ? assetPath("/dice-glass-broken.png")
-                : getDieImagePath(state.dice.types[index]);
+            const dieImagePath = getBoardDieImagePath(state, index);
             return (
               <button
                 key={`die-${index}`}

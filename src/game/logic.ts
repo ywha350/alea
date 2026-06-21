@@ -19,33 +19,110 @@ function randomDie(): number {
   return Math.floor(Math.random() * 6) + 1;
 }
 
-function randomDiceValues(): number[] {
-  return Array.from({ length: 6 }, randomDie);
+type ForesightNext = Array<number | null>;
+
+interface DiceRollResult {
+  values: number[];
+  foresightNext: ForesightNext;
+  anchorFixed: boolean[];
+}
+
+function emptyForesightNext(): ForesightNext {
+  return Array(6).fill(null);
+}
+
+function isValidDieFace(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 6;
+}
+
+function normalizeForesightNext(values?: unknown[]): ForesightNext {
+  return Array.from({ length: 6 }, (_, index) => {
+    const value = values?.[index];
+    return isValidDieFace(value) ? value : null;
+  });
+}
+
+function normalizeAnchorFixed(values?: unknown[]): boolean[] {
+  return Array.from({ length: 6 }, (_, index) => values?.[index] === true);
+}
+
+function randomDieForType(type: SpecialDieId, foresightValue: number | null = null): number {
+  if (type === "foresight" && foresightValue !== null) {
+    return foresightValue;
+  }
+  return type === "wild" ? (Math.random() < 0.5 ? 1 : 5) : randomDie();
+}
+
+function rollDiceValues(
+  types: SpecialDieId[] = basicDiceTypes(),
+  foresightNext: unknown[] = emptyForesightNext(),
+  rollMask: boolean[] = Array(6).fill(true),
+  currentValues: number[] = [],
+  currentAnchorFixed: unknown[] = Array(6).fill(false)
+): DiceRollResult {
+  const normalizedForesightNext = normalizeForesightNext(foresightNext);
+  const normalizedAnchorFixed = normalizeAnchorFixed(currentAnchorFixed);
+  const nextForesight = Array.from({ length: 6 }, (_, index) =>
+    (types[index] ?? "basic") === "foresight" ? normalizedForesightNext[index] : null
+  );
+  const nextAnchorFixed = Array.from({ length: 6 }, (_, index) =>
+    (types[index] ?? "basic") === "anchor" && normalizedAnchorFixed[index]
+  );
+  const values = Array.from({ length: 6 }, (_, index) => {
+    const type = types[index] ?? "basic";
+    if (!rollMask[index]) {
+      return currentValues[index] ?? randomDieForType(type, nextForesight[index]);
+    }
+
+    if (type === "anchor" && nextAnchorFixed[index] && isValidDieFace(currentValues[index])) {
+      return currentValues[index];
+    }
+
+    const value = randomDieForType(type, nextForesight[index]);
+    nextForesight[index] = type === "foresight" ? randomDie() : null;
+    nextAnchorFixed[index] = type === "anchor" && (value === 1 || value === 5);
+    return value;
+  });
+
+  return { values, foresightNext: nextForesight, anchorFixed: nextAnchorFixed };
+}
+
+function randomDiceValues(types: SpecialDieId[] = basicDiceTypes()): number[] {
+  return rollDiceValues(types).values;
 }
 
 function basicDiceTypes(): SpecialDieId[] {
   return Array(6).fill("basic");
 }
 
-function randomScoringDiceValues(
+function randomScoringDiceRoll(
   _boss: BossId | null,
   discount: boolean,
   holdEm = false,
   oddChoice = false,
-  activeMask: boolean[] = Array(6).fill(true)
-): number[] {
+  types: SpecialDieId[] = basicDiceTypes(),
+  foresightNext: unknown[] = emptyForesightNext(),
+  activeMask: boolean[] = Array(6).fill(true),
+  currentValues: number[] = [],
+  currentAnchorFixed: unknown[] = Array(6).fill(false)
+): DiceRollResult {
+  const normalizedForesightNext = normalizeForesightNext(foresightNext);
+  const normalizedAnchorFixed = normalizeAnchorFixed(currentAnchorFixed);
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    const values = randomDiceValues();
-    const active = values.filter((_, index) => activeMask[index]);
+    const roll = rollDiceValues(types, normalizedForesightNext, activeMask, currentValues, normalizedAnchorFixed);
+    const active = roll.values.filter((_, index) => activeMask[index]);
     if (hasAnyScoringDice(active, null, discount, holdEm, oddChoice)) {
-      return values;
+      return roll;
     }
   }
 
-  const fallback = randomDiceValues();
-  const firstActiveIndex = activeMask.findIndex(Boolean);
-  if (firstActiveIndex >= 0) {
-    fallback[firstActiveIndex] = 1;
+  const fallback = rollDiceValues(types, normalizedForesightNext, activeMask, currentValues, normalizedAnchorFixed);
+  const firstFlexibleActiveIndex = activeMask.findIndex((active, index) => {
+    const type = types[index] ?? "basic";
+    return active && type !== "anchor" && (type !== "foresight" || normalizedForesightNext[index] === null);
+  });
+  if (firstFlexibleActiveIndex >= 0) {
+    fallback.values[firstFlexibleActiveIndex] = 1;
   }
   return fallback;
 }
@@ -158,10 +235,34 @@ export function getFaceUpgradeScale(upgrades: UpgradeState, upgradeId: UpgradeId
   return FACE_UPGRADE_SCALE ** getFaceUpgradeLevel(upgrades, upgradeId);
 }
 
-function getValuesUpgradeMultiplier(upgrades: UpgradeState, values: number[]): number {
+export function getFaceUpgradePrice(upgrades: UpgradeState, upgradeId: UpgradeId): number {
+  const basePrice = UPGRADES.find((upgrade) => upgrade.id === upgradeId)?.price ?? 0;
+  return basePrice * (getFaceUpgradeLevel(upgrades, upgradeId) + 1);
+}
+
+type ScoringDieRef = { value: number; index: number };
+
+function activeDieRefs(dice: DiceState): ScoringDieRef[] {
+  return dice.values
+    .map((value, index) => ({ value, index }))
+    .filter((die) => !dice.locked[die.index] && !dice.disabled[die.index]);
+}
+
+function getValuesUpgradeMultiplier(
+  upgrades: UpgradeState,
+  values: number[],
+  scholarSourceDice: ScoringDieRef[] = [],
+  diceTypes: SpecialDieId[] = []
+): number {
   const uniqueValues = new Set(values);
+  const scholarBonusLevels = scholarSourceDice.reduce((counts, die) => {
+    if (uniqueValues.has(die.value) && diceTypes[die.index] === "scholar") {
+      counts[die.value] = (counts[die.value] ?? 0) + 1;
+    }
+    return counts;
+  }, Array(7).fill(0) as number[]);
   return [...uniqueValues].reduce((multiplier, value) => {
-    const level = upgrades.faceUpgradeLevels?.[value] ?? 0;
+    const level = (upgrades.faceUpgradeLevels?.[value] ?? 0) + (scholarBonusLevels[value] ?? 0);
     return multiplier * FACE_UPGRADE_SCALE ** level;
   }, 1);
 }
@@ -217,7 +318,7 @@ function snakeEyesBonusScore(
   }
 
   const targetMultiplier = 4 ** snakeEyesCount;
-  const upgradeMultiplier = getValuesUpgradeMultiplier(state.upgrades, [1]);
+  const upgradeMultiplier = getValuesUpgradeMultiplier(state.upgrades, [1], activeDieRefs(state.dice), state.dice.types);
   if (singleOneScoreAlreadyCounted > 0) {
     return singleOneScoreAlreadyCounted * (targetMultiplier - 1);
   }
@@ -284,6 +385,7 @@ export function createInitialState(): SaveData {
   const now = Date.now();
   const currentBoss = getBossForRound(1);
   const currentBossTone = getBossToneForRound(1);
+  const openingRoll = randomScoringDiceRoll(currentBoss, false);
   return {
     version: SAVE_VERSION,
     createdAt: now,
@@ -306,8 +408,10 @@ export function createInitialState(): SaveData {
       lastRewardBreakdown: []
     },
     dice: {
-      values: randomScoringDiceValues(currentBoss, false),
+      values: openingRoll.values,
       types: basicDiceTypes(),
+      foresightNext: openingRoll.foresightNext,
+      anchorFixed: openingRoll.anchorFixed,
       disabled: Array(6).fill(false),
       selected: Array(6).fill(false),
       locked: Array(6).fill(false),
@@ -367,6 +471,8 @@ export function migrateSave(save: SaveData | null): SaveData {
       ...initial.dice,
       ...save.dice,
       types: save.dice.types ?? initial.dice.types,
+      foresightNext: normalizeForesightNext(save.dice.foresightNext ?? initial.dice.foresightNext),
+      anchorFixed: normalizeAnchorFixed(save.dice.anchorFixed ?? initial.dice.anchorFixed),
       disabled: save.dice.disabled ?? initial.dice.disabled
     },
     run: {
@@ -471,6 +577,9 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   if (selectedValues.length === 0) {
     return { valid: false, score: 0, label: "Select scoring dice", multiplier: 1, flatBonus: 0 };
   }
+  const upgradeSourceDice = activeDieRefs(state.dice);
+  const upgradeMultiplierFor = (values: number[]) =>
+    getValuesUpgradeMultiplier(state.upgrades, values, upgradeSourceDice, state.dice.types);
 
   const discountStraight = hasJoker(state, "discount");
   const oddChoiceCount = getJokerCount(state, "odd-choice");
@@ -485,7 +594,7 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   const dieFaceBonusAppliedIndices = new Set<number>();
   const singleOneScore = 100;
   const singleOneFaceBonus = state.upgrades.dieFaceBonuses[1] ?? 0;
-  const singleOneUpgradeMultiplier = getValuesUpgradeMultiplier(state.upgrades, [1]);
+  const singleOneUpgradeMultiplier = upgradeMultiplierFor([1]);
 
   const straight = selectedValues.length === 6 || discountStraight ? straightScore(selectedValues, discountStraight) : 0;
   const threePairs = selectedValues.length === 6 ? threePairsScore(selectedValues) : 0;
@@ -496,17 +605,17 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
 
   if (straight > 0) {
     const smallStraightCopiedBonus = copiedDiscount && selectedValues.length === 5 ? 2 : 1;
-    score += Math.round(straight * smallStraightCopiedBonus * getValuesUpgradeMultiplier(state.upgrades, selectedValues));
+    score += Math.round(straight * smallStraightCopiedBonus * upgradeMultiplierFor(selectedValues));
     labels.push("Straight");
   } else if (threePairs > 0) {
-    score += Math.round(threePairs * getValuesUpgradeMultiplier(state.upgrades, selectedValues));
+    score += Math.round(threePairs * upgradeMultiplierFor(selectedValues));
     labels.push("Three Pairs");
   } else if (fullHouse > 0) {
-    score += Math.round(fullHouse * (copiedHoldEm ? 2 : 1) * getValuesUpgradeMultiplier(state.upgrades, selectedValues));
+    score += Math.round(fullHouse * (copiedHoldEm ? 2 : 1) * upgradeMultiplierFor(selectedValues));
     labels.push("Full House");
   } else {
     if (twoPairValues.length === 2) {
-      score += Math.round(800 * (copiedHoldEm ? 2 : 1) * getValuesUpgradeMultiplier(state.upgrades, twoPairValues));
+      score += Math.round(800 * (copiedHoldEm ? 2 : 1) * upgradeMultiplierFor(twoPairValues));
       labels.push("Two Pairs");
       twoPairValues.forEach((value) => {
         counts[value] = 0;
@@ -522,7 +631,7 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
         if (selectedIndices.some((die) => die.value === value && state.dice.types[die.index] === "heavy")) {
           kindScore = Math.round(kindScore * 2);
         }
-        kindScore = Math.round(kindScore * getValuesUpgradeMultiplier(state.upgrades, [value]));
+        kindScore = Math.round(kindScore * upgradeMultiplierFor([value]));
         score += kindScore;
         labels.push(`${count}x${value}`);
         counts[value] -= count;
@@ -551,7 +660,7 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
       .map((die) => die.index);
     score += singleFiveIndices.reduce((sum, index) => {
       dieFaceBonusAppliedIndices.add(index);
-      return sum + Math.round((singleFiveScore + (state.upgrades.dieFaceBonuses[5] ?? 0)) * getValuesUpgradeMultiplier(state.upgrades, [5]));
+      return sum + Math.round((singleFiveScore + (state.upgrades.dieFaceBonuses[5] ?? 0)) * upgradeMultiplierFor([5]));
     }, 0);
     if (counts[5] > 0) {
       labels.push(`${counts[5]} five${counts[5] > 1 ? "s" : ""}`);
@@ -570,7 +679,7 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
           sum +
           Math.round(
             (singleThreeScore + (state.upgrades.dieFaceBonuses[3] ?? 0)) *
-              getValuesUpgradeMultiplier(state.upgrades, [3])
+              upgradeMultiplierFor([3])
           )
         );
       }, 0);
@@ -681,17 +790,25 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
 
   const firstRoll = next.dice.rollCount === 0;
   const needsScoringRoll = firstRoll || allLocked;
-  next.dice.values = needsScoringRoll
-    ? randomScoringDiceValues(
+  const rollMask = needsScoringRoll
+    ? next.dice.disabled.map((disabled) => !disabled)
+    : next.dice.values.map((_, index) => !next.dice.locked[index] && !next.dice.disabled[index]);
+  const roll = needsScoringRoll
+    ? randomScoringDiceRoll(
         next.run.currentBoss,
         hasJoker(next, "discount"),
         hasJoker(next, "hold-em"),
         hasJoker(next, "odd-choice"),
-        next.dice.disabled.map((disabled) => !disabled)
+        next.dice.types,
+        next.dice.foresightNext,
+        rollMask,
+        next.dice.values,
+        next.dice.anchorFixed
       )
-    : next.dice.values.map((value, index) =>
-        next.dice.locked[index] || next.dice.disabled[index] ? value : randomDie()
-      );
+    : rollDiceValues(next.dice.types, next.dice.foresightNext, rollMask, next.dice.values, next.dice.anchorFixed);
+  next.dice.values = roll.values;
+  next.dice.foresightNext = roll.foresightNext;
+  next.dice.anchorFixed = roll.anchorFixed;
   next.dice.selected.fill(false);
   next.dice.rollCount += 1;
   next.dice.awaitingAction = true;
@@ -706,6 +823,31 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
   }
 
   next.log.unshift(makeLog(`Roll ${next.dice.rollCount}: ${next.dice.values.join(" ")}`));
+  return next;
+}
+
+export function rerollSingleDieValue(state: SaveData, index: number): SaveData {
+  const next = cloneState(state);
+  if (
+    index < 0 ||
+    index >= next.dice.values.length ||
+    next.dice.locked[index] ||
+    next.dice.disabled[index]
+  ) {
+    return next;
+  }
+
+  const roll = rollDiceValues(
+    next.dice.types,
+    next.dice.foresightNext,
+    next.dice.values.map((_, diceIndex) => diceIndex === index),
+    next.dice.values,
+    next.dice.anchorFixed
+  );
+  next.dice.values = roll.values;
+  next.dice.foresightNext = roll.foresightNext;
+  next.dice.anchorFixed = roll.anchorFixed;
+  next.updatedAt = Date.now();
   return next;
 }
 
@@ -791,7 +933,7 @@ export function confirmSelection(state: SaveData): SaveData {
 
   next.run.turnScore += breakdown.score;
   if (bloodyCount > 0) {
-    next.run.turnScore = Math.round(next.run.turnScore * 1.2 ** bloodyCount);
+    next.run.turnScore = Math.round(next.run.turnScore * 1.5 ** bloodyCount);
   }
   next.dice.selected.forEach((selected, index) => {
     if (selected) {
@@ -822,7 +964,7 @@ export function confirmSelection(state: SaveData): SaveData {
   }
 
   if (bloodyCount > 0) {
-    next.log.unshift(makeLog(`Bloody Die multiplied turn damage x${(1.2 ** bloodyCount).toFixed(2)}.`, "good"));
+    next.log.unshift(makeLog(`Bloody Die multiplied turn damage x${(1.5 ** bloodyCount).toFixed(2)}.`, "good"));
   }
 
   const spartaCount = getJokerCount(next, "sparta");
@@ -839,21 +981,31 @@ export function confirmSelection(state: SaveData): SaveData {
 
 function startNextTurn(state: SaveData, awaitingAction = false): SaveData {
   const previousTypes = state.dice.types ?? basicDiceTypes();
+  const previousForesightNext = normalizeForesightNext(state.dice.foresightNext);
+  const resetAnchorFixed = Array(6).fill(false);
   const previousDisabled = state.dice.disabled ?? Array(6).fill(false);
   const disabled = previousTypes.map((type, index) => type === "glass" && previousDisabled[index]);
+  const rollMask = awaitingAction ? disabled.map((isDisabled) => !isDisabled) : Array(6).fill(false);
+  const roll = awaitingAction
+    ? randomScoringDiceRoll(
+        state.run.currentBoss,
+        hasJoker(state, "discount"),
+        hasJoker(state, "hold-em"),
+        hasJoker(state, "odd-choice"),
+        previousTypes,
+        previousForesightNext,
+        rollMask,
+        state.dice.values,
+        resetAnchorFixed
+      )
+    : rollDiceValues(previousTypes, previousForesightNext, rollMask, state.dice.values, resetAnchorFixed);
   state.dice = {
-    values: awaitingAction
-      ? randomScoringDiceValues(
-          state.run.currentBoss,
-          hasJoker(state, "discount"),
-          hasJoker(state, "hold-em"),
-          hasJoker(state, "odd-choice"),
-          disabled.map((isDisabled) => !isDisabled)
-        )
-      : randomDiceValues(),
+    values: roll.values,
     selected: Array(6).fill(false),
     locked: Array(6).fill(false),
     types: previousTypes,
+    foresightNext: roll.foresightNext,
+    anchorFixed: roll.anchorFixed,
     disabled,
     rollCount: awaitingAction ? 1 : 0,
     hotDice: false,
@@ -1052,10 +1204,12 @@ export function finishFarkleTurn(state: SaveData): SaveData {
 
 export function generateShop(state: SaveData): ShopItem[] {
   const unavailableJokers = new Set<JokerId>(["lucky-cash", "tax-refund", "just-one-more"]);
+  const unavailableSpecialDice = new Set<SpecialDieId>(["zombie", "glass"]);
   const availableJokers = JOKERS.filter((joker) => !unavailableJokers.has(joker.id) && !state.jokers.includes(joker.id));
+  const availableSpecialDice = SPECIAL_DICE.filter((die) => !unavailableSpecialDice.has(die.id));
   const shuffledJokers = [...availableJokers].sort(() => Math.random() - 0.5).slice(0, 2);
   const handUpgrades = [...UPGRADES].sort(() => Math.random() - 0.5).slice(0, 2);
-  const specialDice = [...SPECIAL_DICE].sort(() => Math.random() - 0.5).slice(0, 2);
+  const specialDice = [...availableSpecialDice].sort(() => Math.random() - 0.5).slice(0, 2);
 
   return [
     ...shuffledJokers.map((joker) => ({
@@ -1076,7 +1230,7 @@ export function generateShop(state: SaveData): ShopItem[] {
       id: makeId(),
       kind: "hand-upgrade" as const,
       refId: upgrade.id,
-      price: upgrade.price,
+      price: getFaceUpgradePrice(state.upgrades, upgrade.id),
       purchased: false
     }))
   ];
@@ -1085,7 +1239,9 @@ export function generateShop(state: SaveData): ShopItem[] {
 export function buyShopItem(state: SaveData, itemId: string): SaveData {
   const next = cloneState(state);
   const item = next.shop.items.find((candidate) => candidate.id === itemId);
-  if (!item || item.purchased || next.run.money < item.price) {
+  const price =
+    item?.kind === "hand-upgrade" ? getFaceUpgradePrice(next.upgrades, item.refId as UpgradeId) : item?.price ?? 0;
+  if (!item || item.purchased || next.run.money < price) {
     return next;
   }
 
@@ -1101,8 +1257,8 @@ export function buyShopItem(state: SaveData, itemId: string): SaveData {
   }
 
   item.purchased = true;
-  next.run.money -= item.price;
-  next.log.unshift(makeLog(`Bought ${lookupName(item.kind, item.refId)} for $${item.price}.`, "good"));
+  next.run.money -= price;
+  next.log.unshift(makeLog(`Bought ${lookupName(item.kind, item.refId)} for $${price}.`, "good"));
   next.updatedAt = Date.now();
   return next;
 }
@@ -1135,6 +1291,10 @@ export function buySpecialDieForSlot(state: SaveData, itemId: string, slotIndex:
   }
 
   next.dice.types[slotIndex] = dieId;
+  next.dice.foresightNext = normalizeForesightNext(next.dice.foresightNext);
+  next.dice.foresightNext[slotIndex] = null;
+  next.dice.anchorFixed = normalizeAnchorFixed(next.dice.anchorFixed);
+  next.dice.anchorFixed[slotIndex] = false;
   next.dice.disabled[slotIndex] = false;
   item.purchased = true;
   next.run.money -= item.price;

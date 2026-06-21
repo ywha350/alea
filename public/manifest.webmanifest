@@ -5,19 +5,12 @@
   "display": "standalone",
   "background_color": "#131008",
   "theme_color": "#2f5c3d",
-  "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "./icon-192.png",
-      "sizes": "192x192",
+      "src": "./icon_new.png",
+      "sizes": "90x89",
       "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "./icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }

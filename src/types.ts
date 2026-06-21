@@ -36,7 +36,17 @@ export type UpgradeId =
   | "five-upgrade"
   | "six-upgrade";
 
-export type SpecialDieId = "basic" | "heavy" | "zombie" | "bullseye" | "glass" | "bloody";
+export type SpecialDieId =
+  | "basic"
+  | "heavy"
+  | "zombie"
+  | "bullseye"
+  | "glass"
+  | "bloody"
+  | "wild"
+  | "foresight"
+  | "scholar"
+  | "anchor";
 
 export type BossId =
   | "bone-croupier"
@@ -93,6 +103,8 @@ export interface RunState {
 export interface DiceState {
   values: number[];
   types: SpecialDieId[];
+  foresightNext: Array<number | null>;
+  anchorFixed: boolean[];
   disabled: boolean[];
   selected: boolean[];
   locked: boolean[];

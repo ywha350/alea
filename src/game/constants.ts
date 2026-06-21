@@ -18,7 +18,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "greedy",
     name: "Greedy",
     type: "Multiplier",
-    description: "Each roll multiplies scoring by x1.2.",
+    description: "Each roll multiplies x1.2.",
     price: 5
   },
   {
@@ -246,9 +246,37 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
   {
     id: "bloody",
     name: "Bloody",
-    description: "When scored x1.2 turn damage.",
+    description: "x1.5 turn damage when scored.",
     price: 6,
     image: assetPath("/dice-bloody.png")
+  },
+  {
+    id: "wild",
+    name: "Wild",
+    description: "Only rolls 1 or 5.",
+    price: 6,
+    image: assetPath("/dice-wild.png")
+  },
+  {
+    id: "foresight",
+    name: "Foresight",
+    description: "Shows and guarantees its next roll.",
+    price: 6,
+    image: assetPath("/dice-foresight-1.png")
+  },
+  {
+    id: "scholar",
+    name: "Scholar",
+    description: "One extra level for its rolled number.",
+    price: 8,
+    image: assetPath("/dice-scholar.png")
+  },
+  {
+    id: "anchor",
+    name: "Anchor",
+    description: "Stops rerolling after 1 or 5.",
+    price: 6,
+    image: assetPath("/dice-anchor.png")
   }
 ];
 

@@ -175,3 +175,57 @@ stock market : 이자 두 배
    Moon Die       홀수 턴에는 홀수 숫자 점수 x2, 짝수 턴에는 짝수 숫자 점수 x2            턴마다 가치가 달라짐
 
   Mimic Die      Roll 후 가장 가까운 다른 주사위의 숫자를 복사                           배치와 주변 주사위를 고려
+
+
+  - Loaded Die
+      - 굴릴 때마다 눈이 +1씩 보정된다. 6 다음은 1.
+      - 완전 랜덤이 아니라 리듬을 타는 주사위. 플레이어가 다음 가치를 예측 가능.
+
+   # Foresight 주사위 추가 계획
+
+  ## Summary
+
+  - 새 특수 주사위 ID는 foresight로 구현한다.
+  - 실제 이미지 파일명은 현재 repo에 있는 public/dice-foresight-1.png부터 dice-foresight-6.png를 사용한다.
+  - Foresight 주사위는 “다음에 이 주사위가 굴러갈 값”을 텍스처 파일 번호로 예고하고, 실제 다음 롤에서 반드시 그 값이 나온다.
+  - 구매 직후에는 아직 예고가 없으므로 기존/기본 주사위 텍스처처럼 보이고, 한 번 롤된 뒤부터 예고 텍스처가 표시된다.
+
+  ## Key Changes
+
+  - 타입/정의:
+      - SpecialDieId에 "foresight" 추가.
+      - SPECIAL_DICE에 Foresight 추가. 상점 대표 이미지는 dice-foresight-1.png, 설명은 “Shows and guarantees its next roll.” 계열로 작성.
+      - DiceState에 foresightNext: Array<number | null> 추가. 각 슬롯별 “다음에 실제로 굴릴 값”을 저장한다.
+      - save migration에서 기존 저장 데이터는 foresightNext를 길이 6의 null 배열로 보정한다.
+
+  - 롤 로직:
+      - 주사위 타입별 값 생성 함수에 foresight 분기를 추가한다.
+      - foresightNext[index]가 있으면 해당 값을 롤 결과로 사용한다.
+      - 해당 foresight 주사위가 실제로 굴러간 직후, foresightNext[index]를 1-6 중 무작위 값으로 다시 설정한다.
+      - foresightNext[index]가 없으면 첫 foresight 롤은 일반 1-6 랜덤으로 굴리고, 그 직후 다음 예고값을 생성한다.
+      - locked/disabled 상태라 실제로 굴러가지 않은 foresight 주사위는 기존 예고값을 유지한다.
+      - Hot Dice, Wake Up으로 다시 굴릴 수 있게 된 경우에도 “다음 실제 롤” 규칙을 그대로 적용한다.
+
+  - UI/이미지:
+      - 보드의 die image 선택 시 타입이 foresight이고 foresightNext[index]가 있으면 dice-foresight-${foresightNext[index]}.png를 사용한다.
+      - foresightNext[index]가 없으면 false preview를 피하기 위해 기본 주사위 이미지로 표시한다.
+      - 상점/선택 UI의 대표 이미지는 dice-foresight-1.png를 사용한다.
+      - 앱 시작 시 dice-foresight-1.png부터 dice-foresight-6.png까지 new Image().src = ... 방식으로 모두 프리로드한다.
+
+  ## Test Plan
+
+  - npm run build로 타입체크와 번들 빌드를 통과시킨다.
+  - 수동 시나리오:
+      - Foresight 구매 직후 보드에서 예고 텍스처가 아직 표시되지 않는지 확인한다.
+      - 첫 롤 후 foresight 주사위가 dice-foresight-N.png로 표시되는지 확인한다.
+      - Hot Dice 또는 Wake Up 이후 다시 굴러갈 때 저장된 예고값이 적용되는지 확인한다.
+
+  ## Assumptions
+
+  - 내부 ID와 표시 철자는 foresight를 사용한다.
+  - 실제 파일명은 repo에 존재하는 dice-foresight-N.png를 기준으로 한다.
+  - 구매 직후에는 아직 예고 능력을 보여주지 않고, “한 번 실제로 굴린 뒤”부터 다음 값을 예고한다.
+  - 상점에서는 1번 텍스쳐의 1번 주사위
+
+
+

@@ -113,12 +113,24 @@ p {
 }
 
 .shell {
+  --combat-panel-height: 104px;
+  --score-banner-height: 72px;
+  --score-banner-side: 72px;
+  --score-banner-pad-y: 10px;
+  --score-banner-pad-x: 12px;
+  --responsive-panel-gap: 6px;
+  --stat-box-size: 148px;
+  --relic-slot-size: 76px;
+  --die-slot-size: 148px;
+  --board-padding: 6px;
+  --action-button-height: 64px;
   width: min(100%, 480px);
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0 auto;
   padding: 8px 8px 12px;
   display: grid;
-  gap: 6px;
+  gap: var(--responsive-panel-gap);
   align-content: start;
 }
 
@@ -242,12 +254,12 @@ p {
 }
 
 .score-banner {
-  min-height: 72px;
+  min-height: var(--score-banner-height);
   display: grid;
-  grid-template-columns: 72px 1fr 72px;
+  grid-template-columns: var(--score-banner-side) minmax(0, 1fr) var(--score-banner-side);
   align-items: center;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: var(--responsive-panel-gap);
+  padding: var(--score-banner-pad-y) var(--score-banner-pad-x);
   background:
     radial-gradient(circle at 50% 18%, rgba(232, 180, 92, 0.14), transparent 38%),
     linear-gradient(180deg, #4c2f1c 0%, #402717 100%);
@@ -275,12 +287,11 @@ p {
 }
 
 .enemy-panel {
-  --enemy-panel-size: 104px;
   width: 100%;
   display: grid;
-  grid-template-columns: var(--enemy-panel-size) minmax(0, 1fr);
+  grid-template-columns: var(--combat-panel-height) minmax(0, 1fr);
   gap: 6px;
-  align-items: start;
+  align-items: stretch;
   justify-self: stretch;
   padding: 0;
   background:
@@ -301,7 +312,8 @@ p {
 .market-panel {
   display: grid;
   place-items: center;
-  min-height: 104px;
+  height: var(--combat-panel-height);
+  min-height: 0;
   padding: 12px;
   text-align: center;
   background:
@@ -324,6 +336,7 @@ p {
 .portrait-box {
   position: relative;
   aspect-ratio: 1 / 1;
+  height: var(--combat-panel-height);
   padding: 6px;
   display: grid;
   place-items: center;
@@ -458,7 +471,8 @@ p {
   gap: 3px;
   width: 100%;
   min-width: 0;
-  min-height: var(--enemy-panel-size);
+  height: var(--combat-panel-height);
+  min-height: 0;
   padding: 5px;
   overflow: hidden;
   border: 4px solid var(--ink);
@@ -548,19 +562,22 @@ p {
 
 .stat-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  align-items: start;
+  grid-template-columns: repeat(3, minmax(0, var(--stat-box-size)));
+  gap: var(--responsive-panel-gap);
+  justify-content: center;
+  align-items: stretch;
   padding: 0;
 }
 
 .stat-box {
   aspect-ratio: 1 / 1;
+  width: min(100%, var(--stat-box-size));
+  min-height: 0;
   display: grid;
   place-items: center;
   grid-template-rows: auto 1fr;
   gap: 2px;
-  padding: 6px;
+  padding: clamp(4px, 1.6vw, 6px);
   text-align: center;
   background:
     radial-gradient(circle at 50% 22%, rgba(232, 180, 92, 0.14), transparent 36%),
@@ -705,8 +722,8 @@ p {
 
 .tactical-board {
   display: grid;
-  gap: 6px;
-  padding: 6px;
+  gap: var(--responsive-panel-gap);
+  padding: var(--board-padding);
   background:
     radial-gradient(circle at 50% 30%, rgba(232, 180, 92, 0.1), transparent 36%),
     linear-gradient(180deg, #223626 0%, #1a281c 100%);
@@ -764,12 +781,14 @@ p {
 }
 
 .items-row {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, var(--relic-slot-size)));
+  justify-content: center;
 }
 
 .dice-row {
   position: relative;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, var(--die-slot-size)));
+  justify-content: center;
   gap: 4px;
 }
 
@@ -792,6 +811,15 @@ p {
 
 .last-turn-overlay {
   color: var(--bad);
+}
+
+.choose-die-overlay {
+  color: #8ec774;
+  font-size: clamp(1.6rem, 9vw, 2.7rem);
+  line-height: 1.08;
+  text-shadow: 2px 2px 0 #000, 0 0 10px rgba(142, 199, 116, 0.58);
+  animation: none;
+  opacity: 1;
 }
 
 @keyframes hot-dice-text {
@@ -1478,7 +1506,7 @@ img.market-item-die-image {
 }
 
 .action-button {
-  min-height: 64px;
+  min-height: var(--action-button-height);
   border: 4px solid var(--ink);
   text-transform: uppercase;
   font-size: 1.02rem;
@@ -1725,51 +1753,81 @@ img.market-item-die-image {
 
 @media (max-width: 420px) {
   .shell {
+    --combat-panel-height: 96px;
+    --score-banner-height: 66px;
+    --score-banner-side: 62px;
+    --score-banner-pad-y: 8px;
+    --score-banner-pad-x: 9px;
+    --stat-box-size: 126px;
     padding-inline: 8px;
-  }
-
-  .score-banner {
-    grid-template-columns: 60px 1fr 60px;
-  }
-
-  .enemy-panel {
-    --enemy-panel-size: 96px;
   }
 
   .portrait-box {
     aspect-ratio: 1 / 1;
   }
 
-  .items-row {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-
   .dice-row {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 4px;
   }
 }
 
-@media (orientation: landscape) and (hover: none) and (pointer: coarse) {
-  body::before {
-    content: "세로 방향으로 돌려주세요";
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    background:
-      radial-gradient(circle at 50% 38%, rgba(232, 180, 92, 0.16), transparent 32%),
-      linear-gradient(180deg, #241910 0%, #090b08 100%);
-    color: var(--gold);
-    font-size: clamp(1.45rem, 7vw, 2.6rem);
-    line-height: 1.2;
-    text-align: center;
-    text-shadow: 3px 3px 0 #000;
+@media (max-width: 360px) {
+  .shell {
+    --score-banner-height: 60px;
+    --score-banner-side: 54px;
+    --score-banner-pad-y: 7px;
+    --score-banner-pad-x: 7px;
+    --responsive-panel-gap: 4px;
+    --stat-box-size: 108px;
   }
+}
 
-  #root {
-    visibility: hidden;
+@media (max-width: 340px) {
+  .shell {
+    --score-banner-height: 56px;
+    --score-banner-side: 50px;
+    --stat-box-size: 100px;
+  }
+}
+
+@media (orientation: portrait) and (max-height: 760px) {
+  .shell {
+    --combat-panel-height: 96px;
+    --score-banner-height: 66px;
+    --score-banner-side: 62px;
+    --score-banner-pad-y: 8px;
+    --score-banner-pad-x: 9px;
+    --stat-box-size: 132px;
+    --relic-slot-size: 68px;
+    --die-slot-size: 132px;
+    --action-button-height: 58px;
+  }
+}
+
+@media (orientation: portrait) and (max-height: 700px) {
+  .shell {
+    --combat-panel-height: 88px;
+    --score-banner-height: 60px;
+    --score-banner-side: 56px;
+    --score-banner-pad-y: 7px;
+    --score-banner-pad-x: 8px;
+    --responsive-panel-gap: 4px;
+    --stat-box-size: 116px;
+    --relic-slot-size: 60px;
+    --die-slot-size: 116px;
+    --board-padding: 4px;
+    --action-button-height: 52px;
+  }
+}
+
+@media (orientation: portrait) and (max-height: 640px) {
+  .shell {
+    --combat-panel-height: 80px;
+    --score-banner-height: 56px;
+    --score-banner-side: 50px;
+    --stat-box-size: 104px;
+    --relic-slot-size: 54px;
+    --die-slot-size: 104px;
+    --action-button-height: 48px;
   }
 }
