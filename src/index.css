@@ -114,16 +114,18 @@ p {
 
 .shell {
   --combat-panel-height: 104px;
-  --score-banner-height: 72px;
+  --score-banner-height: 65px;
   --score-banner-side: 72px;
   --score-banner-pad-y: 10px;
   --score-banner-pad-x: 12px;
   --responsive-panel-gap: 6px;
   --stat-box-size: 148px;
+  --stat-box-min-height: 107px;
+  --stat-box-height: clamp(var(--stat-box-min-height), calc(100dvh + var(--stat-box-size) - 820px), var(--stat-box-size));
   --relic-slot-size: 76px;
   --die-slot-size: 148px;
   --board-padding: 6px;
-  --action-button-height: 64px;
+  --action-button-height: 55px;
   width: min(100%, 480px);
   min-height: 100vh;
   min-height: 100dvh;
@@ -572,6 +574,7 @@ p {
 .stat-box {
   aspect-ratio: 1 / 1;
   width: min(100%, var(--stat-box-size));
+  height: var(--stat-box-height);
   min-height: 0;
   display: grid;
   place-items: center;
@@ -943,8 +946,11 @@ p {
   align-self: center;
   justify-self: center;
   display: block;
-  width: min(100%, 56px);
+  width: auto;
+  height: 100%;
+  max-width: 100%;
   aspect-ratio: 1 / 1;
+  object-fit: contain;
   background-repeat: no-repeat;
   background-size: 300% 200%;
   background-position: var(--die-sprite-x, 0%) var(--die-sprite-y, 0%);
@@ -953,7 +959,6 @@ p {
 }
 
 img.market-item-die-image {
-  height: auto;
   object-fit: contain;
   background-size: auto;
 }
@@ -1787,47 +1792,5 @@ img.market-item-die-image {
     --score-banner-height: 56px;
     --score-banner-side: 50px;
     --stat-box-size: 100px;
-  }
-}
-
-@media (orientation: portrait) and (max-height: 760px) {
-  .shell {
-    --combat-panel-height: 96px;
-    --score-banner-height: 66px;
-    --score-banner-side: 62px;
-    --score-banner-pad-y: 8px;
-    --score-banner-pad-x: 9px;
-    --stat-box-size: 132px;
-    --relic-slot-size: 68px;
-    --die-slot-size: 132px;
-    --action-button-height: 58px;
-  }
-}
-
-@media (orientation: portrait) and (max-height: 700px) {
-  .shell {
-    --combat-panel-height: 88px;
-    --score-banner-height: 60px;
-    --score-banner-side: 56px;
-    --score-banner-pad-y: 7px;
-    --score-banner-pad-x: 8px;
-    --responsive-panel-gap: 4px;
-    --stat-box-size: 116px;
-    --relic-slot-size: 60px;
-    --die-slot-size: 116px;
-    --board-padding: 4px;
-    --action-button-height: 52px;
-  }
-}
-
-@media (orientation: portrait) and (max-height: 640px) {
-  .shell {
-    --combat-panel-height: 80px;
-    --score-banner-height: 56px;
-    --score-banner-side: 50px;
-    --stat-box-size: 104px;
-    --relic-slot-size: 54px;
-    --die-slot-size: 104px;
-    --action-button-height: 48px;
   }
 }

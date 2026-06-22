@@ -46,6 +46,13 @@ function normalizeAnchorFixed(values?: unknown[]): boolean[] {
   return Array.from({ length: 6 }, (_, index) => values?.[index] === true);
 }
 
+function normalizeNumberArray(values: unknown[] | undefined, length: number): number[] {
+  return Array.from({ length }, (_, index) => {
+    const value = values?.[index];
+    return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  });
+}
+
 function randomDieForType(type: SpecialDieId, foresightValue: number | null = null): number {
   if (type === "foresight" && foresightValue !== null) {
     return foresightValue;
@@ -58,7 +65,8 @@ function rollDiceValues(
   foresightNext: unknown[] = emptyForesightNext(),
   rollMask: boolean[] = Array(6).fill(true),
   currentValues: number[] = [],
-  currentAnchorFixed: unknown[] = Array(6).fill(false)
+  currentAnchorFixed: unknown[] = Array(6).fill(false),
+  oddChoice = false
 ): DiceRollResult {
   const normalizedForesightNext = normalizeForesightNext(foresightNext);
   const normalizedAnchorFixed = normalizeAnchorFixed(currentAnchorFixed);
@@ -80,7 +88,7 @@ function rollDiceValues(
 
     const value = randomDieForType(type, nextForesight[index]);
     nextForesight[index] = type === "foresight" ? randomDie() : null;
-    nextAnchorFixed[index] = type === "anchor" && (value === 1 || value === 5);
+    nextAnchorFixed[index] = type === "anchor" && (value === 1 || value === 5 || (oddChoice && value === 3));
     return value;
   });
 
@@ -109,14 +117,14 @@ function randomScoringDiceRoll(
   const normalizedForesightNext = normalizeForesightNext(foresightNext);
   const normalizedAnchorFixed = normalizeAnchorFixed(currentAnchorFixed);
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    const roll = rollDiceValues(types, normalizedForesightNext, activeMask, currentValues, normalizedAnchorFixed);
+    const roll = rollDiceValues(types, normalizedForesightNext, activeMask, currentValues, normalizedAnchorFixed, oddChoice);
     const active = roll.values.filter((_, index) => activeMask[index]);
     if (hasAnyScoringDice(active, null, discount, holdEm, oddChoice)) {
       return roll;
     }
   }
 
-  const fallback = rollDiceValues(types, normalizedForesightNext, activeMask, currentValues, normalizedAnchorFixed);
+  const fallback = rollDiceValues(types, normalizedForesightNext, activeMask, currentValues, normalizedAnchorFixed, oddChoice);
   const firstFlexibleActiveIndex = activeMask.findIndex((active, index) => {
     const type = types[index] ?? "basic";
     return active && type !== "anchor" && (type !== "foresight" || normalizedForesightNext[index] === null);
@@ -257,7 +265,7 @@ function getValuesUpgradeMultiplier(
   const uniqueValues = new Set(values);
   const scholarBonusLevels = scholarSourceDice.reduce((counts, die) => {
     if (uniqueValues.has(die.value) && diceTypes[die.index] === "scholar") {
-      counts[die.value] = (counts[die.value] ?? 0) + 1;
+      counts[die.value] = (counts[die.value] ?? 0) + 2;
     }
     return counts;
   }, Array(7).fill(0) as number[]);
@@ -441,6 +449,7 @@ export function createInitialState(): SaveData {
       successfulScoresThisTurn: 0,
       hadFarkleRound: false,
       portraitCopiedJoker: null,
+      specialDieShopAppearances: {},
       dualityStacks: {
         original: 0,
         portrait: 0
@@ -464,8 +473,8 @@ export function migrateSave(save: SaveData | null): SaveData {
     upgrades: {
       ...initial.upgrades,
       ...save.upgrades,
-      faceUpgradeLevels: save.upgrades.faceUpgradeLevels ?? initial.upgrades.faceUpgradeLevels,
-      dieFaceBonuses: save.upgrades.dieFaceBonuses ?? initial.upgrades.dieFaceBonuses
+      faceUpgradeLevels: normalizeNumberArray(save.upgrades.faceUpgradeLevels, 7),
+      dieFaceBonuses: normalizeNumberArray(save.upgrades.dieFaceBonuses, 7)
     },
     dice: {
       ...initial.dice,
@@ -490,6 +499,8 @@ export function migrateSave(save: SaveData | null): SaveData {
         save.flags.bandAidUsesRound ??
         (legacyFlags.bandAidUsedRound ? 1 : 0),
       portraitCopiedJoker: save.flags.portraitCopiedJoker ?? initial.flags.portraitCopiedJoker,
+      specialDieShopAppearances:
+        save.flags.specialDieShopAppearances ?? initial.flags.specialDieShopAppearances,
       dualityStacks: {
         ...initial.flags.dualityStacks,
         ...save.flags.dualityStacks
@@ -716,7 +727,12 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
     score += 300 * getJokerCount(state, "just-one-more");
   }
   score += selectedIndices.reduce(
-    (sum, die) => sum + (dieFaceBonusAppliedIndices.has(die.index) ? 0 : state.upgrades.dieFaceBonuses[die.value] ?? 0),
+    (sum, die) => {
+      if (dieFaceBonusAppliedIndices.has(die.index)) {
+        return sum;
+      }
+      return sum + (state.upgrades.dieFaceBonuses[die.value] ?? 0);
+    },
     0
   );
   let multiplier = 1;
@@ -741,7 +757,7 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   }
   const overtimeCount = getJokerCount(state, "overtime");
   if (overtimeCount > 0 && state.run.turnsLeft === 1) {
-    multiplier *= 1.5 ** overtimeCount;
+    multiplier *= 2 ** overtimeCount;
   }
   const doubleOrNothingCount = getJokerCount(state, "double-or-nothing");
   if (doubleOrNothingCount > 0 && state.run.turnNumber === 1) {
@@ -790,6 +806,7 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
 
   const firstRoll = next.dice.rollCount === 0;
   const needsScoringRoll = firstRoll || allLocked;
+  const anchorFixedForRoll = allLocked ? Array(6).fill(false) : next.dice.anchorFixed;
   const rollMask = needsScoringRoll
     ? next.dice.disabled.map((disabled) => !disabled)
     : next.dice.values.map((_, index) => !next.dice.locked[index] && !next.dice.disabled[index]);
@@ -803,9 +820,9 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
         next.dice.foresightNext,
         rollMask,
         next.dice.values,
-        next.dice.anchorFixed
+        anchorFixedForRoll
       )
-    : rollDiceValues(next.dice.types, next.dice.foresightNext, rollMask, next.dice.values, next.dice.anchorFixed);
+    : rollDiceValues(next.dice.types, next.dice.foresightNext, rollMask, next.dice.values, anchorFixedForRoll, hasJoker(next, "odd-choice"));
   next.dice.values = roll.values;
   next.dice.foresightNext = roll.foresightNext;
   next.dice.anchorFixed = roll.anchorFixed;
@@ -842,7 +859,8 @@ export function rerollSingleDieValue(state: SaveData, index: number): SaveData {
     next.dice.foresightNext,
     next.dice.values.map((_, diceIndex) => diceIndex === index),
     next.dice.values,
-    next.dice.anchorFixed
+    next.dice.anchorFixed,
+    hasJoker(next, "odd-choice")
   );
   next.dice.values = roll.values;
   next.dice.foresightNext = roll.foresightNext;
@@ -1206,10 +1224,15 @@ export function generateShop(state: SaveData): ShopItem[] {
   const unavailableJokers = new Set<JokerId>(["lucky-cash", "tax-refund", "just-one-more"]);
   const unavailableSpecialDice = new Set<SpecialDieId>(["zombie", "glass"]);
   const availableJokers = JOKERS.filter((joker) => !unavailableJokers.has(joker.id) && !state.jokers.includes(joker.id));
-  const availableSpecialDice = SPECIAL_DICE.filter((die) => !unavailableSpecialDice.has(die.id));
+  const availableSpecialDice = SPECIAL_DICE.filter(
+    (die) => !unavailableSpecialDice.has(die.id) && (state.flags.specialDieShopAppearances[die.id] ?? 0) < 2
+  );
   const shuffledJokers = [...availableJokers].sort(() => Math.random() - 0.5).slice(0, 2);
   const handUpgrades = [...UPGRADES].sort(() => Math.random() - 0.5).slice(0, 2);
   const specialDice = [...availableSpecialDice].sort(() => Math.random() - 0.5).slice(0, 2);
+  specialDice.forEach((die) => {
+    state.flags.specialDieShopAppearances[die.id] = (state.flags.specialDieShopAppearances[die.id] ?? 0) + 1;
+  });
 
   return [
     ...shuffledJokers.map((joker) => ({

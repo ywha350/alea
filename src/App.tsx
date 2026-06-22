@@ -376,6 +376,7 @@ function App() {
   const lastTurnOverlayKeyRef = useRef<string | null>(null);
   const previousMarketVisibleRef = useRef(false);
   const marketGridEnteredForCurrentOpenRef = useRef(false);
+  const selectSoundStepRef = useRef(0);
 
   const breakdown = calculateSelectedScore(state);
   const scoringIndices =
@@ -473,6 +474,12 @@ function App() {
   const displayedTurnCount = marketVisible ? currentTurnLimit : Math.max(0, displayTurns - 1);
   const gameOverBestScore = Math.max(records.bestScore, state.run.totalScore);
   const activePortraitCopy = getActivePortraitCopy(state);
+
+  useEffect(() => {
+    if (!state.dice.selected.some(Boolean)) {
+      selectSoundStepRef.current = 0;
+    }
+  }, [state.dice.selected]);
 
   const apply = (next: SaveData, sound?: Parameters<typeof playUiSound>[0]) => {
     stateRef.current = next;
@@ -1255,9 +1262,9 @@ function App() {
       calculateSelectedScore(next).valid;
     setState(next);
     if (selectionChanged) {
-      const changedCount = next.dice.selected.filter((selected, diceIndex) => selected !== state.dice.selected[diceIndex]).length;
       const selectedCount = next.dice.selected.filter(Boolean).length;
-      const selectedMoreDice = selectedCount > state.dice.selected.filter(Boolean).length;
+      const previousSelectedCount = state.dice.selected.filter(Boolean).length;
+      const selectedMoreDice = selectedCount > previousSelectedCount;
       if (selectedTripletStarted) {
         triggerEffectiveJokerEffect("triplet");
       }
@@ -1286,7 +1293,11 @@ function App() {
       if (selectedMoreDice && getJokerCount(state, "big-risk") > 0 && state.dice.rollCount >= 4) {
         triggerEffectiveJokerEffect("big-risk");
       }
-      playUiSound("select", { step: changedCount > 1 ? 1 : selectedCount });
+      const selectSoundStep = selectedMoreDice
+        ? selectSoundStepRef.current + 1
+        : Math.max(0, selectSoundStepRef.current - 1);
+      selectSoundStepRef.current = selectedCount === 0 ? 0 : selectSoundStep;
+      playUiSound("select", { step: selectSoundStep });
     }
   };
 

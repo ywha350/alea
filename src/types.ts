@@ -164,6 +164,7 @@ export interface SaveData {
     successfulScoresThisTurn: number;
     hadFarkleRound: boolean;
     portraitCopiedJoker: JokerId | null;
+    specialDieShopAppearances: Partial<Record<Exclude<SpecialDieId, "basic">, number>>;
     dualityStacks: {
       original: number;
       portrait: number;
