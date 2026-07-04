@@ -4,7 +4,7 @@ import type { BossId, JokerDefinition, SpecialDieDefinition, UpgradeDefinition }
 export const TARGETS = [1000, 1500, 2200, 3200, 4700, 6800, 9500, 13000];
 export const TURN_LIMIT = 5;
 export const SAVE_KEY = "main";
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export const JOKERS: JokerDefinition[] = [
   {
@@ -137,7 +137,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "overtime",
     name: "Overtime",
     type: "Turn economy",
-    description: "On the final turn, damage x2.",
+    description: "On the final turn, damage x2 & score x4.",
     price: 5
   },
   {
@@ -265,9 +265,16 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
     image: assetPath("/dice-foresight-1.png")
   },
   {
+    id: "charged",
+    name: "Charged",
+    description: "Scores twice before banking. Recharges on Hot Dice or next turn.",
+    price: 7,
+    image: assetPath("/charged1.png")
+  },
+  {
     id: "scholar",
     name: "Scholar",
-    description: "Two extra levels for its rolled number.",
+    description: "One extra level for its rolled number.",
     price: 8,
     image: assetPath("/dice-scholar.png")
   },
@@ -277,6 +284,13 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
     description: "Stops rerolling after 1 or 5.",
     price: 6,
     image: assetPath("/dice-anchor.png")
+  },
+  {
+    id: "pheonix",
+    name: "Pheonix",
+    description: "Stays in hand patterns after being scored.",
+    price: 7,
+    image: assetPath("/pheonix.png")
   }
 ];
 

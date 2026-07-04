@@ -19,7 +19,9 @@ import {
   getFaceUpgradeScale,
   getActivePortraitCopy,
   getGreedyMultiplier,
+  hasHoldEmSelectionConflict,
   getJokerCount,
+  getLockedPheonixValues,
   getScoringIndices,
   handleFarkle,
   hasAnyScoringDice,
@@ -36,6 +38,43 @@ function formatScore(value: number): string {
   return value.toLocaleString();
 }
 
+function formatDamageDisplay(value: number): { text: string; lines: string[]; longestLineLength: number } {
+  const text = formatScore(value);
+  if (text.length < 10) {
+    return { text, lines: [text], longestLineLength: text.length };
+  }
+
+  const groups = text.split(",");
+  if (groups.length < 2) {
+    return { text, lines: [text], longestLineLength: text.length };
+  }
+
+  let bestLines = [text];
+  let bestLongestLineLength = text.length;
+  let bestLengthDifference = text.length;
+
+  for (let splitIndex = 1; splitIndex < groups.length; splitIndex += 1) {
+    const firstLine = `${groups.slice(0, splitIndex).join(",")},`;
+    const secondLine = groups.slice(splitIndex).join(",");
+    const longestLineLength = Math.max(firstLine.length, secondLine.length);
+    const lengthDifference = Math.abs(firstLine.length - secondLine.length);
+    const isBetterSplit =
+      longestLineLength < bestLongestLineLength ||
+      (longestLineLength === bestLongestLineLength && lengthDifference < bestLengthDifference) ||
+      (longestLineLength === bestLongestLineLength &&
+        lengthDifference === bestLengthDifference &&
+        firstLine.length >= secondLine.length);
+
+    if (isBetterSplit) {
+      bestLines = [firstLine, secondLine];
+      bestLongestLineLength = longestLineLength;
+      bestLengthDifference = lengthDifference;
+    }
+  }
+
+  return { text, lines: bestLines, longestLineLength: bestLongestLineLength };
+}
+
 const RECORDS_KEY = "dungeon-alea-records";
 const ROLL_ANIMATION_MS = 300;
 const MY_BAD_REROLL_DELAY_MS = 300;
@@ -50,6 +89,7 @@ const BASIC_DIE_IMAGE_PATH = assetPath("/dice-basic.png");
 const FORESIGHT_DIE_IMAGE_PATHS = Array.from({ length: 6 }, (_, index) =>
   assetPath(`/dice-foresight-${index + 1}.png`)
 );
+const CHARGED_DIE_IMAGE_PATHS = [assetPath("/charged1.png"), assetPath("/charged2.png")];
 
 interface HomeRecords {
   bestScore: number;
@@ -142,18 +182,27 @@ function getBoardDieImagePath(state: SaveData, index: number): string {
     const nextValue = state.dice.foresightNext?.[index] ?? null;
     return nextValue === null ? BASIC_DIE_IMAGE_PATH : FORESIGHT_DIE_IMAGE_PATHS[nextValue - 1] ?? BASIC_DIE_IMAGE_PATH;
   }
+  if (type === "charged") {
+    return state.dice.chargedUsed?.[index] ? CHARGED_DIE_IMAGE_PATHS[1] : CHARGED_DIE_IMAGE_PATHS[0];
+  }
   return getDieImagePath(type);
 }
 
-function dieSpriteStyle(value: number, imagePath = BASIC_DIE_IMAGE_PATH): CSSProperties {
+function dieSpriteStyle(
+  value: number,
+  imagePath = BASIC_DIE_IMAGE_PATH,
+  spriteRows = 2,
+  rowOffset = 0
+): CSSProperties {
   const normalized = Math.max(1, Math.min(6, value)) - 1;
   const column = normalized % 3;
-  const row = Math.floor(normalized / 3);
+  const row = Math.floor(normalized / 3) + rowOffset;
 
   return {
     backgroundImage: `url("${imagePath}")`,
+    backgroundSize: `300% ${spriteRows * 100}%`,
     "--die-sprite-x": `${column * 50}%`,
-    "--die-sprite-y": `${row * 100}%`
+    "--die-sprite-y": `${spriteRows <= 1 ? 0 : (row * 100) / (spriteRows - 1)}%`
   } as CSSProperties;
 }
 
@@ -188,7 +237,7 @@ function hasSelectedTriplet(state: SaveData): boolean {
 }
 
 function isDiscountSmallStraight(state: SaveData): boolean {
-  const values = [...getSelectedValues(state)].sort((a, b) => a - b);
+  const values = [...getSelectedValues(state), ...getLockedPheonixValues(state.dice)].sort((a, b) => a - b);
   const key = values.join(",");
   return values.length === 5 && (key === "1,2,3,4,5" || key === "2,3,4,5,6");
 }
@@ -388,9 +437,11 @@ function App() {
           getJokerCount(state, "discount") > 0,
           state.dice.disabled,
           getJokerCount(state, "hold-em") > 0,
-          getJokerCount(state, "odd-choice") > 0
+          getJokerCount(state, "odd-choice") > 0,
+          state.dice.types
         )
       : new Set<number>();
+  const holdEmSelectionConflict = hasHoldEmSelectionConflict(state);
   const bossId: BossId | "normal" = state.run.currentBoss ?? "normal";
   const bossData = state.run.currentBoss ? BOSSES[state.run.currentBoss] : null;
   const enemyDescription = bossData
@@ -434,6 +485,10 @@ function App() {
   const suppressNextDamageDeltaRef = useRef(false);
   const damagePopupDieIndexRef = useRef<number | null>(null);
   const allowNextHotDiceOverlayRef = useRef(false);
+  const damageDisplay = formatDamageDisplay(displayDamage);
+  const damageValueStyle = {
+    "--damage-fit-size": `${145 / Math.max(1, damageDisplay.longestLineLength)}cqw`
+  } as CSSProperties;
   const attackCanBank = previewTurnScore > 0 && !state.shop.open && !state.run.gameOver;
   const shopJokers = state.shop.items.filter((item) => item.kind === "joker");
   const shopDiceItems = state.shop.items.filter((item) => item.kind === "die-upgrade" || item.kind === "special-die");
@@ -561,7 +616,8 @@ function App() {
       candidate.run.currentBoss,
       getJokerCount(candidate, "discount") > 0,
       getJokerCount(candidate, "hold-em") > 0,
-      getJokerCount(candidate, "odd-choice") > 0
+      getJokerCount(candidate, "odd-choice") > 0,
+      getLockedPheonixValues(candidate.dice)
     );
   };
 
@@ -629,7 +685,7 @@ function App() {
   };
 
   useEffect(() => {
-    FORESIGHT_DIE_IMAGE_PATHS.forEach((src) => {
+    [...FORESIGHT_DIE_IMAGE_PATHS, ...CHARGED_DIE_IMAGE_PATHS].forEach((src) => {
       const image = new Image();
       image.src = src;
     });
@@ -1210,7 +1266,8 @@ function App() {
       suppressNextDamageDeltaRef.current = true;
     } else if (scoringIndices.has(index)) {
       const activeValues = state.dice.values.filter((_, diceIndex) => !state.dice.locked[diceIndex] && !state.dice.disabled[diceIndex]);
-      const counts = getCounts(activeValues);
+      const patternValues = [...activeValues, ...getLockedPheonixValues(state.dice)];
+      const counts = getCounts(patternValues);
       const clickedValue = state.dice.values[index];
       const unlockedIndices = state.dice.values
         .map((_, diceIndex) => diceIndex)
@@ -1222,15 +1279,17 @@ function App() {
 
       let pulseIndices: number[] = [];
       if (
+        !holdEmSelectionConflict &&
         !clickedValueScoresAlone &&
-        (isStraight(activeValues) ||
-          isThreePairs(activeValues) ||
+        (isStraight(patternValues) ||
+          isThreePairs(patternValues) ||
           (getJokerCount(state, "discount") > 0 &&
-            ([1, 2, 3, 4, 5].every((value) => activeValues.includes(value)) ||
-              [2, 3, 4, 5, 6].every((value) => activeValues.includes(value)))))
+            ([1, 2, 3, 4, 5].every((value) => patternValues.includes(value)) ||
+              [2, 3, 4, 5, 6].every((value) => patternValues.includes(value)))))
       ) {
         pulseIndices = unlockedIndices;
       } else if (
+        !holdEmSelectionConflict &&
         !clickedValueScoresAlone &&
         counts[clickedValue] >= 3
       ) {
@@ -1389,7 +1448,8 @@ function App() {
         getJokerCount(candidate, "discount") > 0,
         candidate.dice.disabled,
         getJokerCount(candidate, "hold-em") > 0,
-        getJokerCount(candidate, "odd-choice") > 0
+        getJokerCount(candidate, "odd-choice") > 0,
+        candidate.dice.types
       );
       return candidate.dice.values
         .map((_, index) => index)
@@ -1403,7 +1463,8 @@ function App() {
         current.run.currentBoss,
         getJokerCount(current, "discount") > 0,
         getJokerCount(current, "hold-em") > 0,
-        getJokerCount(current, "odd-choice") > 0
+        getJokerCount(current, "odd-choice") > 0,
+        getLockedPheonixValues(current.dice)
       )
         ? current
         : handleFarkle(current);
@@ -1824,8 +1885,16 @@ function App() {
         <article className="stat-box frame damage-stat">
           <span className="eyebrow">Damage</span>
           <div className="damage-stack">
-            <strong className={`damage-value ${displayDamage >= 100000 ? "compact" : ""} ${damageDanger ? "danger" : ""}`}>
-              {displayDamage}
+            <strong
+              className={`damage-value ${damageDisplay.lines.length > 1 ? "wrapped" : ""} ${damageDanger ? "danger" : ""}`}
+              style={damageValueStyle}
+              aria-label={damageDisplay.text}
+            >
+              {damageDisplay.lines.map((line, index) => (
+                <span key={`${index}-${line}`} className="damage-value-line" aria-hidden="true">
+                  {line}
+                </span>
+              ))}
             </strong>
           </div>
         </article>
@@ -2051,6 +2120,7 @@ function App() {
             const dieDeltaPopups = damageDeltaPopups.filter((popup) => popup.dieIndex === index);
             const pressing = diePressPulses.some((pulse) => pulse.dieIndex === index);
             const dieImagePath = getBoardDieImagePath(state, index);
+            const chargedUsed = state.dice.types[index] === "charged" && state.dice.chargedUsed?.[index] === true;
             return (
               <button
                 key={`die-${index}`}
@@ -2069,7 +2139,11 @@ function App() {
                     ))}
                   </span>
                 ) : null}
-                <span className="die-image" style={dieSpriteStyle(value, dieImagePath)} aria-hidden="true" />
+                <span
+                  className="die-image"
+                  style={dieSpriteStyle(value, dieImagePath, chargedUsed ? 4 : 2, chargedUsed ? 2 : 0)}
+                  aria-hidden="true"
+                />
                 <span className="die-state">
                   {disabled ? "Inactive" : locked ? "Banked" : selected ? "Chosen" : scoring ? "Live" : "Dead"}
                 </span>

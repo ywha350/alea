@@ -45,8 +45,10 @@ export type SpecialDieId =
   | "bloody"
   | "wild"
   | "foresight"
+  | "charged"
   | "scholar"
-  | "anchor";
+  | "anchor"
+  | "pheonix";
 
 export type BossId =
   | "bone-croupier"
@@ -105,6 +107,7 @@ export interface DiceState {
   types: SpecialDieId[];
   foresightNext: Array<number | null>;
   anchorFixed: boolean[];
+  chargedUsed: boolean[];
   disabled: boolean[];
   selected: boolean[];
   locked: boolean[];
@@ -164,7 +167,6 @@ export interface SaveData {
     successfulScoresThisTurn: number;
     hadFarkleRound: boolean;
     portraitCopiedJoker: JokerId | null;
-    specialDieShopAppearances: Partial<Record<Exclude<SpecialDieId, "basic">, number>>;
     dualityStacks: {
       original: number;
       portrait: number;
