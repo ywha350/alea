@@ -137,7 +137,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "overtime",
     name: "Overtime",
     type: "Turn economy",
-    description: "On the final turn, damage x2 & score x4.",
+    description: "Damage x2 & score x4 finale.",
     price: 5
   },
   {
@@ -267,7 +267,7 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
   {
     id: "charged",
     name: "Charged",
-    description: "Scores twice before banking. Recharges on Hot Dice or next turn.",
+    description: "Scores twice before banking.",
     price: 7,
     image: assetPath("/charged1.png")
   },
@@ -288,7 +288,7 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
   {
     id: "pheonix",
     name: "Pheonix",
-    description: "Stays in hand patterns after being scored.",
+    description: "Stays in patterns after scoring.",
     price: 7,
     image: assetPath("/pheonix.png")
   }

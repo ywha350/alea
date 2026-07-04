@@ -192,16 +192,24 @@ function choosePortraitCopy(state: SaveData): JokerId | null {
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
-function tryWakeUp(state: SaveData): void {
+function tryWakeUp(state: SaveData): boolean {
+  let activated = false;
   for (let attempt = 0; attempt < getJokerCount(state, "wake-up"); attempt += 1) {
     const inactiveDiceCount = state.dice.disabled.filter(Boolean).length;
     const bankedDiceCount = state.dice.locked.filter(Boolean).length;
     if (inactiveDiceCount + bankedDiceCount > 0 && Math.random() < 0.15) {
+      state.dice.types.forEach((type, index) => {
+        if (type === "charged" && (state.dice.disabled[index] || state.dice.locked[index])) {
+          state.dice.chargedUsed[index] = false;
+        }
+      });
       state.dice.disabled.fill(false);
       state.dice.locked.fill(false);
       state.log.unshift(makeLog(`Wake Up reactivated ${inactiveDiceCount + bankedDiceCount} dice.`, "good"));
+      activated = true;
     }
   }
+  return activated;
 }
 
 function tryFaustianBargain(state: SaveData): void {
@@ -885,8 +893,9 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
   }
 
   const startsHotDiceRoll = next.dice.hotDice && next.dice.locked.every((locked, index) => locked || next.dice.disabled[index]);
+  let wakeUpActivated = false;
   if (!startsHotDiceRoll) {
-    tryWakeUp(next);
+    wakeUpActivated = tryWakeUp(next);
   }
   tryFaustianBargain(next);
 
@@ -898,7 +907,7 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
   }
 
   const firstRoll = next.dice.rollCount === 0;
-  const needsScoringRoll = firstRoll || allLocked;
+  const needsScoringRoll = firstRoll || allLocked || wakeUpActivated;
   const anchorFixedForRoll = allLocked ? Array(6).fill(false) : next.dice.anchorFixed;
   const rollMask = needsScoringRoll
     ? next.dice.disabled.map((disabled) => !disabled)
@@ -1336,7 +1345,7 @@ export function finishFarkleTurn(state: SaveData): SaveData {
 }
 
 export function generateShop(state: SaveData): ShopItem[] {
-  const unavailableJokers = new Set<JokerId>(["lucky-cash", "tax-refund", "just-one-more"]);
+  const unavailableJokers = new Set<JokerId>(["lucky-cash", "tax-refund", "just-one-more", "odd-choice"]);
   const unavailableSpecialDice = new Set<SpecialDieId>(["zombie", "glass"]);
   const availableJokers = JOKERS.filter((joker) => !unavailableJokers.has(joker.id) && !state.jokers.includes(joker.id));
   const availableSpecialDice = SPECIAL_DICE.filter(

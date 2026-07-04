@@ -489,7 +489,13 @@ function App() {
   const damageValueStyle = {
     "--damage-fit-size": `${145 / Math.max(1, damageDisplay.longestLineLength)}cqw`
   } as CSSProperties;
-  const attackCanBank = previewTurnScore > 0 && !state.shop.open && !state.run.gameOver;
+  const finalTurnAttackRequirementMet =
+    state.run.turnsLeft !== 1 || previewTurnScore >= enemyHpRemaining;
+  const attackCanBank =
+    previewTurnScore > 0 &&
+    finalTurnAttackRequirementMet &&
+    !state.shop.open &&
+    !state.run.gameOver;
   const shopJokers = state.shop.items.filter((item) => item.kind === "joker");
   const shopDiceItems = state.shop.items.filter((item) => item.kind === "die-upgrade" || item.kind === "special-die");
   const shopHandUpgrades = state.shop.items.filter((item) => item.kind === "hand-upgrade");
