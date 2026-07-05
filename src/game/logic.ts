@@ -61,7 +61,7 @@ function randomDieForType(type: SpecialDieId, foresightValue: number | null = nu
   if (type === "foresight" && foresightValue !== null) {
     return foresightValue;
   }
-  return type === "wild" ? (Math.random() < 0.5 ? 1 : 5) : randomDie();
+  return type === "odd" ? Math.floor(Math.random() * 3) * 2 + 1 : randomDie();
 }
 
 function rollDiceValues(
@@ -532,7 +532,9 @@ export function migrateSave(save: SaveData | null): SaveData {
     dice: {
       ...initial.dice,
       ...save.dice,
-      types: save.dice.types ?? initial.dice.types,
+      types: (save.dice.types ?? initial.dice.types).map((type) =>
+        (type as string) === "wild" ? "odd" : type
+      ),
       foresightNext: normalizeForesightNext(save.dice.foresightNext ?? initial.dice.foresightNext),
       anchorFixed: normalizeAnchorFixed(save.dice.anchorFixed ?? initial.dice.anchorFixed),
       chargedUsed: normalizeChargedUsed(save.dice.chargedUsed ?? initial.dice.chargedUsed),
@@ -545,6 +547,15 @@ export function migrateSave(save: SaveData | null): SaveData {
       currentBossTone: validBossTone(savedRun.currentBossTone, save.run.round ?? initial.run.round),
       bossDescriptionIndex: validBossDescriptionIndex(currentBoss, save.run.bossDescriptionIndex),
       lastRewardBreakdown: save.run.lastRewardBreakdown ?? initial.run.lastRewardBreakdown
+    },
+    shop: {
+      ...initial.shop,
+      ...save.shop,
+      items: (save.shop.items ?? initial.shop.items).map((item) =>
+        item.kind === "special-die" && (item.refId as string) === "wild"
+          ? { ...item, refId: "odd" }
+          : item
+      )
     },
     flags: {
       ...initial.flags,

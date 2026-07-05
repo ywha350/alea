@@ -89,7 +89,7 @@ const BASIC_DIE_IMAGE_PATH = assetPath("/dice-basic.png");
 const FORESIGHT_DIE_IMAGE_PATHS = Array.from({ length: 6 }, (_, index) =>
   assetPath(`/dice-foresight-${index + 1}.png`)
 );
-const CHARGED_DIE_IMAGE_PATHS = [assetPath("/charged1.png"), assetPath("/charged2.png")];
+const CHARGED_DIE_IMAGE_PATHS = [assetPath("/dice-charged1.png"), assetPath("/dice-charged2.png")];
 
 interface HomeRecords {
   bestScore: number;

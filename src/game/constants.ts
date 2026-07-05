@@ -251,11 +251,11 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
     image: assetPath("/dice-bloody.png")
   },
   {
-    id: "wild",
-    name: "Wild",
-    description: "Only rolls 1 or 5.",
+    id: "odd",
+    name: "Odd",
+    description: "Only rolls 1, 3, 5.",
     price: 6,
-    image: assetPath("/dice-wild.png")
+    image: assetPath("/dice-odd.png")
   },
   {
     id: "foresight",
@@ -269,7 +269,7 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
     name: "Charged",
     description: "Scores twice before banking.",
     price: 7,
-    image: assetPath("/charged1.png")
+    image: assetPath("/dice-charged1.png")
   },
   {
     id: "scholar",
@@ -290,7 +290,7 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
     name: "Pheonix",
     description: "Stays in patterns after scoring.",
     price: 7,
-    image: assetPath("/pheonix.png")
+    image: assetPath("/dice-pheonix.png")
   }
 ];
 

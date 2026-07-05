@@ -43,7 +43,7 @@ export type SpecialDieId =
   | "bullseye"
   | "glass"
   | "bloody"
-  | "wild"
+  | "odd"
   | "foresight"
   | "charged"
   | "scholar"
