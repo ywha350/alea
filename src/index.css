@@ -1193,6 +1193,10 @@ img.market-item-die-image {
   animation: hot-dice-text 720ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+.joker-effect-label.greedy-effect-label.compact-greedy-effect-label {
+  font-size: 1.28rem;
+}
+
 @keyframes joker-effect-label-pop {
   0% {
     opacity: 0;

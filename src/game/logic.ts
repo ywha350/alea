@@ -19,6 +19,8 @@ function randomDie(): number {
   return Math.floor(Math.random() * 6) + 1;
 }
 
+const WILD_DIE_FACES = [1, 1, 2, 3, 4, 5, 5, 6];
+
 type ForesightNext = Array<number | null>;
 
 interface DiceRollResult {
@@ -61,7 +63,10 @@ function randomDieForType(type: SpecialDieId, foresightValue: number | null = nu
   if (type === "foresight" && foresightValue !== null) {
     return foresightValue;
   }
-  return type === "odd" ? Math.floor(Math.random() * 3) * 2 + 1 : randomDie();
+  if (type === "wild") {
+    return WILD_DIE_FACES[Math.floor(Math.random() * WILD_DIE_FACES.length)];
+  }
+  return randomDie();
 }
 
 function rollDiceValues(
@@ -87,6 +92,7 @@ function rollDiceValues(
     }
 
     if (type === "anchor" && nextAnchorFixed[index] && isValidDieFace(currentValues[index])) {
+      nextAnchorFixed[index] = false;
       return currentValues[index];
     }
 
@@ -533,7 +539,7 @@ export function migrateSave(save: SaveData | null): SaveData {
       ...initial.dice,
       ...save.dice,
       types: (save.dice.types ?? initial.dice.types).map((type) =>
-        (type as string) === "wild" ? "odd" : type
+        (type as string) === "odd" ? "wild" : type
       ),
       foresightNext: normalizeForesightNext(save.dice.foresightNext ?? initial.dice.foresightNext),
       anchorFixed: normalizeAnchorFixed(save.dice.anchorFixed ?? initial.dice.anchorFixed),
@@ -552,8 +558,8 @@ export function migrateSave(save: SaveData | null): SaveData {
       ...initial.shop,
       ...save.shop,
       items: (save.shop.items ?? initial.shop.items).map((item) =>
-        item.kind === "special-die" && (item.refId as string) === "wild"
-          ? { ...item, refId: "odd" }
+        item.kind === "special-die" && (item.refId as string) === "odd"
+          ? { ...item, refId: "wild" }
           : item
       )
     },
@@ -1205,7 +1211,7 @@ function clearRewardBreakdown(state: SaveData, bankedAmount: number, hadFarkle: 
     });
   }
 
-  const wealthBonus = Math.min(5, Math.floor(state.run.money / 5));
+  const wealthBonus = Math.min(4, Math.floor(state.run.money / 5));
   if (wealthBonus > 0) {
     const interestMultiplier = 2 ** getJokerCount(state, "investment");
     breakdown.push({

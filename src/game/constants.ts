@@ -4,7 +4,7 @@ import type { BossId, JokerDefinition, SpecialDieDefinition, UpgradeDefinition }
 export const TARGETS = [1000, 1500, 2200, 3200, 4700, 6800, 9500, 13000];
 export const TURN_LIMIT = 5;
 export const SAVE_KEY = "main";
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export const JOKERS: JokerDefinition[] = [
   {
@@ -251,11 +251,11 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
     image: assetPath("/dice-bloody.png")
   },
   {
-    id: "odd",
-    name: "Odd",
-    description: "Only rolls 1, 3, 5.",
+    id: "wild",
+    name: "Wild",
+    description: "Higher chance of 1 & 5.",
     price: 6,
-    image: assetPath("/dice-odd.png")
+    image: assetPath("/dice-wild.png")
   },
   {
     id: "foresight",
@@ -278,13 +278,13 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
     price: 8,
     image: assetPath("/dice-scholar.png")
   },
-  {
-    id: "anchor",
-    name: "Anchor",
-    description: "Stops rerolling after 1 or 5.",
-    price: 6,
-    image: assetPath("/dice-anchor.png")
-  },
+    {
+      id: "anchor",
+      name: "Anchor",
+      description: "Stays fixed once after 1 or 5",
+      price: 6,
+      image: assetPath("/dice-anchor.png")
+    },
   {
     id: "pheonix",
     name: "Pheonix",

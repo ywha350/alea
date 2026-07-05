@@ -149,13 +149,27 @@ function formatDelta(value: number): string {
 }
 
 function formatGreedyMultiplierLabel(multiplier: number): string {
+  if (multiplier >= 1_000) {
+    const units = ["K", "M", "B", "T", "Qa", "Qi"];
+    const unitIndex = Math.min(Math.floor(Math.log10(multiplier) / 3) - 1, units.length - 1);
+    const unitValue = multiplier / 1_000 ** (unitIndex + 1);
+    const numberLabel =
+      unitValue < 10
+        ? unitValue.toFixed(1).replace(/\.0$/, "")
+        : `${Math.floor(unitValue)}`.slice(0, 3);
+    return `${numberLabel}${units[unitIndex]}`;
+  }
   if (multiplier >= 100) {
     return `${Math.floor(multiplier)}`.slice(0, 3);
   }
   if (multiplier >= 10) {
-    return `${Math.floor(multiplier)}`;
+    return `x${`${Math.floor(multiplier)}`.slice(0, 2)}`;
   }
   return `x${multiplier.toFixed(1)}`;
+}
+
+function hasThreeDigitGreedyUnit(label: string): boolean {
+  return /^\d{3}(?:K|M|B|T|Qa|Qi)$/.test(label);
 }
 
 function isFixedAnchorDie(state: SaveData, index: number): boolean {
@@ -177,6 +191,9 @@ function getBoardDieImagePath(state: SaveData, index: number): string {
   const type = state.dice.types[index];
   if (type === "glass" && state.dice.disabled[index]) {
     return assetPath("/dice-glass-broken.png");
+  }
+  if (type === "anchor" && state.dice.anchorFixed?.[index]) {
+    return assetPath("/dice-anchor-fixed.png");
   }
   if (type === "foresight") {
     const nextValue = state.dice.foresightNext?.[index] ?? null;
@@ -244,6 +261,10 @@ function isDiscountSmallStraight(state: SaveData): boolean {
 
 function getDualityMultiplierLabel(stack: number): string {
   return `x${2 ** stack}`;
+}
+
+function getFeverMultiplierLabel(charges: number): string {
+  return `x${2 ** Math.min(3, charges)}`;
 }
 
 const BOSS_TITLES: Record<string, string> = {
@@ -658,10 +679,10 @@ function App() {
       triggerEffectiveJokerEffect("momentum");
     }
     if (before.flags.feverCharges > 0 && !hotDiceTriggered) {
-      triggerEffectiveJokerEffect("fever");
+      triggerEffectiveJokerEffect("fever", getFeverMultiplierLabel(before.flags.feverCharges));
     }
     if (hotDiceTriggered && getJokerCount(before, "fever") > 0) {
-      triggerEffectiveJokerEffect("fever");
+      triggerEffectiveJokerEffect("fever", getFeverMultiplierLabel(after.flags.feverCharges));
     }
     if (hotDiceTriggered && getJokerCount(before, "clean-sweep") > 0) {
       triggerEffectiveJokerEffect("clean-sweep");
@@ -1343,7 +1364,7 @@ function App() {
         triggerEffectiveJokerEffect("sparta");
       }
       if (selectedMoreDice && state.flags.feverCharges > 0) {
-        triggerEffectiveJokerEffect("fever");
+        triggerEffectiveJokerEffect("fever", getFeverMultiplierLabel(state.flags.feverCharges));
       }
       if (state.dice.rollCount > 1) {
         const greedyMultiplier = getGreedyMultiplier(state.dice.rollCount);
@@ -1998,9 +2019,15 @@ function App() {
             const slotClassName = `board-slot relic-slot ${jokerId ? "filled" : "empty"} ${jokerId === "the-portrait" ? "portrait-slot" : ""} ${portraitCopyId ? "portrait-copy-slot" : ""} ${inactive ? "inactive" : ""} ${jokerEffect ? "joker-effect" : ""} ${salePending ? "sell-pending" : ""} ${canSellJoker ? "sellable" : ""}`;
             const multiplierLabel =
               jokerId === "greedy" ||
+              jokerId === "fever" ||
               jokerId === "duality" ||
-              (jokerId === "the-portrait" && (activePortraitCopy === "greedy" || activePortraitCopy === "duality"));
-            const labelClassName = `joker-effect-label ${multiplierLabel ? "greedy-effect-label" : ""}`;
+              (jokerId === "the-portrait" &&
+                (activePortraitCopy === "greedy" || activePortraitCopy === "fever" || activePortraitCopy === "duality"));
+            const compactGreedyLabel =
+              effectiveInactiveJokerId === "greedy" &&
+              !!jokerEffect?.label &&
+              hasThreeDigitGreedyUnit(jokerEffect.label);
+            const labelClassName = `joker-effect-label ${multiplierLabel ? "greedy-effect-label" : ""} ${compactGreedyLabel ? "compact-greedy-effect-label" : ""}`;
             return canSellJoker ? (
               <button
                 key={`item-${index}-${jokerEffect?.key ?? "idle"}`}
