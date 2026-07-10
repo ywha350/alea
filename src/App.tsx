@@ -6,6 +6,7 @@ import { BOSSES, JOKERS, SPECIAL_DICE, TURN_LIMIT, UPGRADES } from "./game/const
 import { playUiSound } from "./game/audio";
 import { cloneState, makeId } from "./game/platform";
 import {
+  applyCameleonTransform,
   bankScore,
   buyDieUpgradeForFace,
   buyShopItem,
@@ -14,10 +15,13 @@ import {
   confirmSelection,
   createInitialState,
   finishFarkleTurn,
+  getActiveSeventhValues,
+  getEffectiveFaceUpgradePrice,
+  getEffectiveFaceUpgradeLevel,
+  getEffectiveFaceUpgradeScale,
   getFaceUpgradeLevel,
-  getFaceUpgradePrice,
-  getFaceUpgradeScale,
   getActivePortraitCopy,
+  getCameleonTransformCandidates,
   getGreedyMultiplier,
   hasHoldEmSelectionConflict,
   getJokerCount,
@@ -30,6 +34,7 @@ import {
   nextRound,
   rerollSingleDieValue,
   rollDice,
+  selectionUsesSeventh,
   toggleDieSelection
 } from "./game/logic";
 import type { BossId, JokerId, SaveData, UpgradeId } from "./types";
@@ -90,6 +95,7 @@ const FORESIGHT_DIE_IMAGE_PATHS = Array.from({ length: 6 }, (_, index) =>
   assetPath(`/dice-foresight-${index + 1}.png`)
 );
 const CHARGED_DIE_IMAGE_PATHS = [assetPath("/dice-charged1.png"), assetPath("/dice-charged2.png")];
+const BLINK_DIE_IMAGE_PATHS = [assetPath("/dice-blink1.png"), assetPath("/dice-blink2.png"), assetPath("/dice-blink3.png")];
 
 interface HomeRecords {
   bestScore: number;
@@ -202,6 +208,9 @@ function getBoardDieImagePath(state: SaveData, index: number): string {
   if (type === "charged") {
     return state.dice.chargedUsed?.[index] ? CHARGED_DIE_IMAGE_PATHS[1] : CHARGED_DIE_IMAGE_PATHS[0];
   }
+  if (type === "blink") {
+    return BLINK_DIE_IMAGE_PATHS[(state.dice.blinkMode ?? 2) - 1] ?? BLINK_DIE_IMAGE_PATHS[1];
+  }
   return getDieImagePath(type);
 }
 
@@ -260,7 +269,7 @@ function isDiscountSmallStraight(state: SaveData): boolean {
 }
 
 function getDualityMultiplierLabel(stack: number): string {
-  return `x${2 ** stack}`;
+  return stack > 0 ? "x2" : "x1";
 }
 
 function getFeverMultiplierLabel(charges: number): string {
@@ -305,7 +314,10 @@ const JOKER_IMAGE_PATHS: Partial<Record<string, string>> = {
   duality: assetPath("/jokers/duality.png"),
   investment: assetPath("/jokers/investment.png"),
   "wake-up": assetPath("/jokers/wake%20up.png"),
-  "faustian-bargain": assetPath("/jokers/faustian%20bargain.png")
+  "faustian-bargain": assetPath("/jokers/faustian%20bargain.png"),
+  "7th": assetPath("/jokers/7th.png"),
+  evenly: assetPath("/jokers/evenly.png"),
+  "on-sale": assetPath("/jokers/on%20sale.png")
 };
 
 const DUMMY_DIE_UPGRADE_IMAGE_PATH = assetPath("/dice/die1.png");
@@ -405,6 +417,10 @@ function App() {
   const [isMyBadRerollPending, setIsMyBadRerollPending] = useState(false);
   const [rollingDiceValues, setRollingDiceValues] = useState<number[]>([]);
   const [rollingDiceMask, setRollingDiceMask] = useState<boolean[]>([]);
+  const [rollingSeventhValues, setRollingSeventhValues] = useState<{ original: number | null; portrait: number | null }>({
+    original: null,
+    portrait: null
+  });
   const [diePressPulses, setDiePressPulses] = useState<DiePressPulse[]>([]);
   const [activeJokerEffects, setActiveJokerEffects] = useState<JokerEffect[]>([]);
   const [pendingDieUpgradeItemId, setPendingDieUpgradeItemId] = useState<string | null>(null);
@@ -437,12 +453,15 @@ function App() {
   const rewardTimeoutsRef = useRef<number[]>([]);
   const cleanSweepTimeoutsRef = useRef<number[]>([]);
   const cleanSweepAnimationFrameRef = useRef<number | null>(null);
+  const pocketChangeTimeoutsRef = useRef<number[]>([]);
+  const pocketChangeAnimationFrameRef = useRef<number | null>(null);
   const gameOverOverlayTimeoutRef = useRef<number | null>(null);
   const stateRef = useRef(state);
   const scoreAnimationFrameRef = useRef<number | null>(null);
   const previousRoundScoreRef = useRef(state.run.roundScore);
   const lastHotDiceLogIdRef = useRef<string | null>(null);
   const lastCleanSweepLogIdRef = useRef<string | null>(null);
+  const lastPocketChangeLogIdRef = useRef<string | null>(null);
   const lastTurnOverlayKeyRef = useRef<string | null>(null);
   const previousMarketVisibleRef = useRef(false);
   const marketGridEnteredForCurrentOpenRef = useRef(false);
@@ -459,7 +478,8 @@ function App() {
           state.dice.disabled,
           getJokerCount(state, "hold-em") > 0,
           getJokerCount(state, "odd-choice") > 0,
-          state.dice.types
+          state.dice.types,
+          getActiveSeventhValues(state)
         )
       : new Set<number>();
   const holdEmSelectionConflict = hasHoldEmSelectionConflict(state);
@@ -556,6 +576,19 @@ function App() {
   const displayedTurnCount = marketVisible ? currentTurnLimit : Math.max(0, displayTurns - 1);
   const gameOverBestScore = Math.max(records.bestScore, state.run.totalScore);
   const activePortraitCopy = getActivePortraitCopy(state);
+  const displayedSeventhValueFor = (source: "original" | "portrait"): number | null => {
+    const active =
+      source === "original"
+        ? state.jokers.includes("7th")
+        : activePortraitCopy === "7th";
+    if (!active) {
+      return null;
+    }
+    if (isRolling) {
+      return rollingSeventhValues[source] ?? state.flags.seventhValues[source] ?? 1;
+    }
+    return state.flags.seventhValues[source] ?? 1;
+  };
 
   useEffect(() => {
     if (!state.dice.selected.some(Boolean)) {
@@ -638,13 +671,16 @@ function App() {
 
   const hasRollScoringDice = (candidate: SaveData) => {
     const activeValuesAfterRoll = candidate.dice.values.filter((_, index) => !candidate.dice.locked[index] && !candidate.dice.disabled[index]);
+    const activeTypesAfterRoll = candidate.dice.types.filter((_, index) => !candidate.dice.locked[index] && !candidate.dice.disabled[index]);
     return hasAnyScoringDice(
       activeValuesAfterRoll,
       candidate.run.currentBoss,
       getJokerCount(candidate, "discount") > 0,
       getJokerCount(candidate, "hold-em") > 0,
       getJokerCount(candidate, "odd-choice") > 0,
-      getLockedPheonixValues(candidate.dice)
+      getLockedPheonixValues(candidate.dice),
+      getActiveSeventhValues(candidate),
+      activeTypesAfterRoll
     );
   };
 
@@ -767,6 +803,11 @@ function App() {
       cleanSweepTimeoutsRef.current = [];
       if (cleanSweepAnimationFrameRef.current !== null) {
         cancelAnimationFrame(cleanSweepAnimationFrameRef.current);
+      }
+      pocketChangeTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      pocketChangeTimeoutsRef.current = [];
+      if (pocketChangeAnimationFrameRef.current !== null) {
+        cancelAnimationFrame(pocketChangeAnimationFrameRef.current);
       }
       if (marketTimeoutRef.current !== null) {
         window.clearTimeout(marketTimeoutRef.current);
@@ -1068,6 +1109,58 @@ function App() {
   }, [rewardBreakdown, state.log, state.run.cleared, state.run.money]);
 
   useEffect(() => {
+    const pocketChangeLog = state.log.find((entry) => entry.text.startsWith("Pocket Change gained $"));
+    if (!pocketChangeLog || pocketChangeLog.id === lastPocketChangeLogIdRef.current) {
+      return;
+    }
+
+    const pocketChangeAmount = Number(pocketChangeLog.text.match(/Pocket Change gained \$(\d+)\./)?.[1] ?? 0);
+    if (pocketChangeAmount <= 0) {
+      return;
+    }
+
+    lastPocketChangeLogIdRef.current = pocketChangeLog.id;
+    pocketChangeTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    pocketChangeTimeoutsRef.current = [];
+    if (pocketChangeAnimationFrameRef.current !== null) {
+      cancelAnimationFrame(pocketChangeAnimationFrameRef.current);
+    }
+
+    const pendingClearReward = state.run.cleared
+      ? rewardBreakdown.reduce((sum, item) => sum + item.amount, 0)
+      : 0;
+    const to = state.run.money - pendingClearReward;
+    const from = to - pocketChangeAmount;
+    const popupKey = `${pocketChangeLog.id}-change`;
+    const startedAt = performance.now();
+
+    setDisplayMoney(from);
+    setRewardPopups((current) => [...current, { key: popupKey, label: "change", amount: pocketChangeAmount }]);
+    playUiSound("coin");
+
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / 460);
+      const eased = 1 - (1 - progress) ** 3;
+      setDisplayMoney(Math.round(from + (to - from) * eased));
+      if (progress < 1) {
+        pocketChangeAnimationFrameRef.current = requestAnimationFrame(tick);
+      } else {
+        pocketChangeAnimationFrameRef.current = null;
+      }
+    };
+    pocketChangeAnimationFrameRef.current = requestAnimationFrame(tick);
+
+    pocketChangeTimeoutsRef.current.push(
+      window.setTimeout(() => {
+        setRewardPopups((current) => current.filter((popup) => popup.key !== popupKey));
+      }, REWARD_LABEL_MS),
+      window.setTimeout(() => {
+        setDisplayMoney(to);
+      }, 500)
+    );
+  }, [rewardBreakdown, state.log, state.run.cleared, state.run.money]);
+
+  useEffect(() => {
     if (!state.run.gameOver) {
       recordedGameOverRef.current = false;
       setShowGameOverOverlay(false);
@@ -1198,6 +1291,7 @@ function App() {
 
   useEffect(() => {
     if (!isRolling) {
+      setRollingSeventhValues({ original: null, portrait: null });
       return;
     }
 
@@ -1207,12 +1301,16 @@ function App() {
           rollingDiceMask[index] ? randomDisplayDie() : current[index] ?? value
         )
       );
+      setRollingSeventhValues({
+        original: state.jokers.includes("7th") ? randomDisplayDie() : null,
+        portrait: getActivePortraitCopy(state) === "7th" ? randomDisplayDie() : null
+      });
     }, ROLL_TICK_MS);
 
     return () => {
       window.clearInterval(interval);
     };
-  }, [isRolling, rollingDiceMask, state.dice.values]);
+  }, [activePortraitCopy, isRolling, rollingDiceMask, state.dice.values, state.jokers]);
 
   useEffect(() => {
     return () => {
@@ -1360,6 +1458,18 @@ function App() {
       if (selectedSnakeEyesStarted) {
         triggerEffectiveJokerEffect("snake-eyes");
       }
+      if (selectedMoreDice && getJokerCount(state, "evenly") > 0 && getSelectedValues(next).some((value) => value === 2 || value === 4 || value === 6)) {
+        triggerEffectiveJokerEffect("evenly");
+      }
+      if (selectedMoreDice) {
+        const seventhUsage = selectionUsesSeventh(next);
+        if (seventhUsage.original) {
+          triggerJokerEffect("7th");
+        }
+        if (seventhUsage.portrait) {
+          triggerJokerEffect("the-portrait");
+        }
+      }
       if (spartaStarted) {
         triggerEffectiveJokerEffect("sparta");
       }
@@ -1459,14 +1569,6 @@ function App() {
       ...(getActivePortraitCopy(rolledState) === "my-bad" ? (["the-portrait"] as JokerId[]) : [])
     ];
 
-    if (myBadAnimationQueue.length <= 0) {
-      setIsRolling(false);
-      setRollingDiceMask([]);
-      setRollingDiceValues([]);
-      finishResolvedRoll(options.beforeState ?? rolledState, rolledState);
-      return;
-    }
-
     const nonScoringIndicesFor = (candidate: SaveData) => {
       const scoringIndicesAfterRoll = getScoringIndices(
         candidate.dice.values,
@@ -1476,7 +1578,8 @@ function App() {
         candidate.dice.disabled,
         getJokerCount(candidate, "hold-em") > 0,
         getJokerCount(candidate, "odd-choice") > 0,
-        candidate.dice.types
+        candidate.dice.types,
+        getActiveSeventhValues(candidate)
       );
       return candidate.dice.values
         .map((_, index) => index)
@@ -1485,13 +1588,16 @@ function App() {
 
     const finishMyBadChain = (current: SaveData) => {
       const activeValuesAfterReroll = current.dice.values.filter((_, index) => !current.dice.locked[index] && !current.dice.disabled[index]);
+      const activeTypesAfterReroll = current.dice.types.filter((_, index) => !current.dice.locked[index] && !current.dice.disabled[index]);
       const finalState = hasAnyScoringDice(
         activeValuesAfterReroll,
         current.run.currentBoss,
         getJokerCount(current, "discount") > 0,
         getJokerCount(current, "hold-em") > 0,
         getJokerCount(current, "odd-choice") > 0,
-        getLockedPheonixValues(current.dice)
+        getLockedPheonixValues(current.dice),
+        getActiveSeventhValues(current),
+        activeTypesAfterReroll
       )
         ? current
         : handleFarkle(current);
@@ -1502,6 +1608,37 @@ function App() {
       finishResolvedRoll(current, finalState);
     };
 
+    const findPriorityForesightRerollIndex = (candidate: SaveData, nonScoringIndices: number[]) =>
+      nonScoringIndices.find((index) => {
+        if (candidate.dice.types[index] !== "foresight") {
+          return false;
+        }
+        const nextValue = candidate.dice.foresightNext?.[index] ?? null;
+        if (nextValue === null) {
+          return false;
+        }
+
+        const valuesAfterForesightReroll = candidate.dice.values.map((value, valueIndex) =>
+          valueIndex === index ? nextValue : value
+        );
+        const activeValuesAfterForesightReroll = valuesAfterForesightReroll.filter(
+          (_, valueIndex) => !candidate.dice.locked[valueIndex] && !candidate.dice.disabled[valueIndex]
+        );
+        const activeTypesAfterForesightReroll = candidate.dice.types.filter(
+          (_, valueIndex) => !candidate.dice.locked[valueIndex] && !candidate.dice.disabled[valueIndex]
+        );
+        return hasAnyScoringDice(
+          activeValuesAfterForesightReroll,
+          candidate.run.currentBoss,
+          getJokerCount(candidate, "discount") > 0,
+          getJokerCount(candidate, "hold-em") > 0,
+          getJokerCount(candidate, "odd-choice") > 0,
+          getLockedPheonixValues(candidate.dice),
+          getActiveSeventhValues(candidate),
+          activeTypesAfterForesightReroll
+        );
+      });
+
     const runMyBadReroll = (current: SaveData, remainingAnimations: JokerId[]) => {
       const nonScoringIndices = nonScoringIndicesFor(current);
       if (remainingAnimations.length <= 0 || nonScoringIndices.length === 0) {
@@ -1509,8 +1646,18 @@ function App() {
         return;
       }
 
-      const rerollIndex = nonScoringIndices[Math.floor(Math.random() * nonScoringIndices.length)];
+      const priorityForesightIndex = findPriorityForesightRerollIndex(current, nonScoringIndices);
+      const rerollIndex =
+        priorityForesightIndex ?? nonScoringIndices[Math.floor(Math.random() * nonScoringIndices.length)];
       const [animationJokerId, ...nextAnimations] = remainingAnimations;
+      if (Math.random() >= 0.5) {
+        const failedState = cloneState(current);
+        failedState.log.unshift({ id: makeId(), text: "My bad failed to reroll.", tone: "bad" });
+        failedState.updatedAt = Date.now();
+        runMyBadReroll(failedState, nextAnimations);
+        return;
+      }
+
       triggerJokerEffect(animationJokerId);
       const rerolledState = rerollSingleDieValue(current, rerollIndex);
       rerolledState.log.unshift({ id: makeId(), text: `My bad rerolled die ${rerollIndex + 1}.`, tone: "good" });
@@ -1536,8 +1683,40 @@ function App() {
       }, MY_BAD_REROLL_DELAY_MS);
     };
 
-    runMyBadReroll(rolledState, myBadAnimationQueue);
+    const runCameleonChain = (current: SaveData) => {
+      const candidates = getCameleonTransformCandidates(current, rollMask);
+      const candidate = candidates.find(() => Math.random() < 0.5);
+      if (!candidate) {
+        runMyBadReroll(current, myBadAnimationQueue);
+        return;
+      }
+
+      const transformedState = applyCameleonTransform(current, candidate);
+      setState(current);
+      setIsRolling(false);
+      setIsMyBadRerollPending(true);
+      setRollingDiceMask([]);
+      setRollingDiceValues([]);
+      rollTimeoutRef.current = window.setTimeout(() => {
+        setRollingDiceMask(current.dice.values.map((_, index) => index === candidate.index));
+        setRollingDiceValues(current.dice.values);
+        setIsRolling(true);
+        setIsMyBadRerollPending(false);
+        playUiSound("roll");
+        rollTimeoutRef.current = window.setTimeout(() => {
+          setIsRolling(false);
+          setRollingDiceMask([]);
+          setRollingDiceValues([]);
+          runCameleonChain(transformedState);
+        }, ROLL_ANIMATION_MS);
+      }, MY_BAD_REROLL_DELAY_MS);
+    };
+
+    runCameleonChain(rolledState);
   };
+
+  const hasActiveCameleon = (candidate: SaveData) =>
+    candidate.dice.types.some((type, index) => type === "cameleon" && !candidate.dice.disabled[index]);
 
   const onRoll = () => {
     if (isRolling || isMyBadRerollPending) {
@@ -1549,7 +1728,7 @@ function App() {
       triggerConfirmJokerEffects(state, scoredState, { triggerMomentum: false });
       allowNextHotDiceOverlayRef.current = scoredState.dice.hotDice;
       const allUnavailable = scoredState.dice.locked.every((locked, index) => locked || scoredState.dice.disabled[index]);
-      const deferFarkle = getJokerCount(scoredState, "my-bad") > 0;
+      const deferFarkle = getJokerCount(scoredState, "my-bad") > 0 || hasActiveCameleon(scoredState);
       const next = rollDice(scoredState, { deferFarkle });
       const wakeUpActivated = next.log.some(
         (entry) => !scoredState.log.some((previous) => previous.id === entry.id) && entry.text.startsWith("Wake Up reactivated")
@@ -1586,7 +1765,7 @@ function App() {
 
     const beforeRollCount = state.dice.rollCount;
     const allUnavailable = state.dice.locked.every((locked, index) => locked || state.dice.disabled[index]);
-    const deferFarkle = getJokerCount(state, "my-bad") > 0;
+    const deferFarkle = getJokerCount(state, "my-bad") > 0 || hasActiveCameleon(state);
     const next = rollDice(state, { deferFarkle });
     const wakeUpActivated = next.log.some(
       (entry) => !state.log.some((previous) => previous.id === entry.id) && entry.text.startsWith("Wake Up reactivated")
@@ -1667,6 +1846,7 @@ function App() {
     }
     lastHotDiceLogIdRef.current = null;
     lastCleanSweepLogIdRef.current = null;
+    lastPocketChangeLogIdRef.current = null;
     previousRoundScoreRef.current = 0;
     setDisplayMoney(next.run.money);
     setDisplayTurns(next.run.turnsLeft);
@@ -1680,6 +1860,12 @@ function App() {
     if (cleanSweepAnimationFrameRef.current !== null) {
       cancelAnimationFrame(cleanSweepAnimationFrameRef.current);
       cleanSweepAnimationFrameRef.current = null;
+    }
+    pocketChangeTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    pocketChangeTimeoutsRef.current = [];
+    if (pocketChangeAnimationFrameRef.current !== null) {
+      cancelAnimationFrame(pocketChangeAnimationFrameRef.current);
+      pocketChangeAnimationFrameRef.current = null;
     }
     clearSequenceTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
     clearSequenceTimeoutsRef.current = [];
@@ -1821,8 +2007,8 @@ function App() {
     }
     const upgradeId = item.refId as UpgradeId;
     const upgrade = UPGRADES.find((candidate) => candidate.id === upgradeId);
-    const level = getFaceUpgradeLevel(state.upgrades, upgradeId);
-    const currentScale = getFaceUpgradeScale(state.upgrades, upgradeId);
+    const level = getEffectiveFaceUpgradeLevel(state, upgradeId);
+    const currentScale = getEffectiveFaceUpgradeScale(state, upgradeId);
     return {
       name: `LV.${level + 1} ${upgrade?.name ?? "number"}`,
       description: `multiply 2.\n Current scale : x${currentScale.toFixed(1)}`
@@ -1944,8 +2130,20 @@ function App() {
               portraitCopyId
                 ? getJokerImagePath(portraitCopyId, `portrait-copy-slot-${index}`)
                 : null;
+            const seventhSlotValue =
+              jokerId === "7th"
+                ? displayedSeventhValueFor("original")
+                : jokerId === "the-portrait" && portraitCopyId === "7th"
+                  ? displayedSeventhValueFor("portrait")
+                  : null;
             const jokerArtwork =
-              jokerId === "the-portrait" && portraitCopiedImagePath ? (
+              seventhSlotValue !== null ? (
+                <span
+                  className="relic-slot-seventh-die"
+                  style={dieSpriteStyle(seventhSlotValue, JOKER_IMAGE_PATHS["7th"])}
+                  aria-hidden="true"
+                />
+              ) : jokerId === "the-portrait" && portraitCopiedImagePath ? (
                 <span className="portrait-copy-artwork" aria-hidden="true">
                   <img
                     className="relic-slot-joker-image portrait-copied-joker-image portrait-copy-base-image"
@@ -2063,7 +2261,7 @@ function App() {
                   const itemText = getShopItemText(item);
                   const jokerImagePath = item.kind === "joker" ? getJokerImagePath(item.refId, "market-item") : null;
                   const itemPrice =
-                    item.kind === "hand-upgrade" ? getFaceUpgradePrice(state.upgrades, item.refId as UpgradeId) : item.price;
+                    item.kind === "hand-upgrade" ? getEffectiveFaceUpgradePrice(state, item.refId as UpgradeId) : item.price;
                   const disabled =
                     rewardAnimating ||
                     marketLeaving ||
@@ -2082,7 +2280,13 @@ function App() {
                         <strong>{itemText.name}</strong>
                         <em>${itemPrice}</em>
                       </span>
-                      {jokerImagePath ? (
+                      {item.kind === "joker" && item.refId === "7th" ? (
+                        <span
+                          className="market-item-die-image"
+                          style={dieSpriteStyle(1, JOKER_IMAGE_PATHS["7th"])}
+                          aria-hidden="true"
+                        />
+                      ) : jokerImagePath ? (
                         <img
                           className="market-item-joker-image"
                           src={jokerImagePath}

@@ -22,6 +22,7 @@ function randomDie(): number {
 const WILD_DIE_FACES = [1, 1, 2, 3, 4, 5, 5, 6];
 
 type ForesightNext = Array<number | null>;
+type BlinkMode = 1 | 2 | 3;
 
 interface DiceRollResult {
   values: number[];
@@ -50,6 +51,10 @@ function normalizeAnchorFixed(values?: unknown[]): boolean[] {
 
 function normalizeChargedUsed(values?: unknown[]): boolean[] {
   return Array.from({ length: 6 }, (_, index) => values?.[index] === true);
+}
+
+function normalizeBlinkMode(value: unknown): BlinkMode {
+  return value === 1 || value === 2 || value === 3 ? value : 2;
 }
 
 function normalizeNumberArray(values: unknown[] | undefined, length: number): number[] {
@@ -129,7 +134,8 @@ function randomScoringDiceRoll(
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const roll = rollDiceValues(types, normalizedForesightNext, activeMask, currentValues, normalizedAnchorFixed, oddChoice);
     const active = roll.values.filter((_, index) => activeMask[index]);
-    if (hasAnyScoringDice(active, null, discount, holdEm, oddChoice)) {
+    const activeTypes = types.filter((_, index) => activeMask[index]);
+    if (hasAnyScoringDice(active, null, discount, holdEm, oddChoice, [], [], activeTypes)) {
       return roll;
     }
   }
@@ -228,11 +234,26 @@ function tryFaustianBargain(state: SaveData): void {
   }
 }
 
+function rollSeventhValues(state: SaveData): void {
+  state.flags.seventhValues.original = hasOwnedJoker(state, "7th") ? randomDie() : null;
+  state.flags.seventhValues.portrait = getActivePortraitCopy(state) === "7th" ? randomDie() : null;
+}
+
 function getTurnLimit(state: SaveData): number {
   return TURN_LIMIT + getJokerCount(state, "deal");
 }
 
 const FACE_UPGRADE_SCALE = 2;
+const OPPOSITE_DIE_INDICES = [5, 4, 3, 2, 1, 0];
+const ORTHOGONAL_DIE_NEIGHBORS = [
+  [1, 3],
+  [0, 2, 4],
+  [1, 5],
+  [0, 4],
+  [1, 3, 5],
+  [2, 4]
+];
+const BLINK_MULTIPLIERS = [1.2, 1.44, 1.73, 2.1, 2.5, 3];
 
 export function getUpgradeFace(upgradeId: UpgradeId): number {
   if (upgradeId === "one-upgrade") {
@@ -257,8 +278,18 @@ export function getFaceUpgradeLevel(upgrades: UpgradeState, upgradeId: UpgradeId
   return upgrades.faceUpgradeLevels?.[getUpgradeFace(upgradeId)] ?? 0;
 }
 
+export function getEffectiveFaceUpgradeLevel(state: SaveData, upgradeId: UpgradeId): number {
+  const face = getUpgradeFace(upgradeId);
+  const evenlyBonus = face % 2 === 0 ? getJokerCount(state, "evenly") : 0;
+  return getFaceUpgradeLevel(state.upgrades, upgradeId) + evenlyBonus;
+}
+
 export function getFaceUpgradeScale(upgrades: UpgradeState, upgradeId: UpgradeId): number {
   return FACE_UPGRADE_SCALE ** getFaceUpgradeLevel(upgrades, upgradeId);
+}
+
+export function getEffectiveFaceUpgradeScale(state: SaveData, upgradeId: UpgradeId): number {
+  return FACE_UPGRADE_SCALE ** getEffectiveFaceUpgradeLevel(state, upgradeId);
 }
 
 export function getFaceUpgradePrice(upgrades: UpgradeState, upgradeId: UpgradeId): number {
@@ -266,7 +297,191 @@ export function getFaceUpgradePrice(upgrades: UpgradeState, upgradeId: UpgradeId
   return basePrice * 2 ** getFaceUpgradeLevel(upgrades, upgradeId);
 }
 
+export function getEffectiveFaceUpgradePrice(state: SaveData, upgradeId: UpgradeId): number {
+  const basePrice = getFaceUpgradePrice(state.upgrades, upgradeId);
+  const discountCount = getJokerCount(state, "on-sale");
+  return discountCount > 0 ? Math.max(1, Math.floor(basePrice * 0.5 ** discountCount)) : basePrice;
+}
+
+function nextBlinkMode(mode: BlinkMode): BlinkMode {
+  return mode === 2 ? 3 : mode === 3 ? 1 : 2;
+}
+
+function hasActiveBlinkInRollMask(dice: DiceState, rollMask: boolean[]): boolean {
+  return dice.types.some((type, index) => type === "blink" && rollMask[index] && !dice.locked[index] && !dice.disabled[index]);
+}
+
+function advanceBlinkModeForRoll(dice: DiceState, rollMask: boolean[]): void {
+  if (hasActiveBlinkInRollMask(dice, rollMask)) {
+    dice.blinkMode = nextBlinkMode(normalizeBlinkMode(dice.blinkMode));
+  }
+}
+
+function getActiveBlinkCount(dice: DiceState): number {
+  return dice.types.filter((type, index) => type === "blink" && !dice.locked[index] && !dice.disabled[index]).length;
+}
+
+export interface CameleonTransformCandidate {
+  index: number;
+  targetValue: number;
+}
+
+function getCameleonTargetValue(state: SaveData, index: number): number | null {
+  const counts = ORTHOGONAL_DIE_NEIGHBORS[index].reduce((totals, neighborIndex) => {
+    if (!state.dice.disabled[neighborIndex]) {
+      const value = state.dice.values[neighborIndex];
+      totals[value] = (totals[value] ?? 0) + 1;
+    }
+    return totals;
+  }, Array(7).fill(0) as number[]);
+  const targetValue = counts.findIndex((count, value) => value >= 1 && count >= 2);
+  return targetValue >= 1 && targetValue !== state.dice.values[index] ? targetValue : null;
+}
+
+export function getCameleonTransformCandidates(state: SaveData, rollMask: boolean[]): CameleonTransformCandidate[] {
+  return state.dice.types.flatMap((type, index) => {
+    const targetValue = getCameleonTargetValue(state, index);
+    return type === "cameleon" &&
+      rollMask[index] &&
+      !state.dice.locked[index] &&
+      !state.dice.disabled[index] &&
+      targetValue !== null
+      ? [{ index, targetValue }]
+      : [];
+  });
+}
+
+export function applyCameleonTransform(state: SaveData, candidate: CameleonTransformCandidate): SaveData {
+  const next = cloneState(state);
+  if (
+    next.dice.types[candidate.index] !== "cameleon" ||
+    next.dice.locked[candidate.index] ||
+    next.dice.disabled[candidate.index] ||
+    !isValidDieFace(candidate.targetValue)
+  ) {
+    return next;
+  }
+
+  next.dice.values[candidate.index] = candidate.targetValue;
+  next.log.unshift(makeLog(`Cameleon changed die ${candidate.index + 1} to ${candidate.targetValue}.`, "good"));
+  next.updatedAt = Date.now();
+  return next;
+}
+
 type ScoringDieRef = { value: number; index: number };
+type PatternDieRef = { value: number; index: number; type: SpecialDieId };
+type SeventhSource = "original" | "portrait";
+type SeventhDieRef = { source: SeventhSource; value: number };
+
+function getActiveSeventhDice(state: SaveData): SeventhDieRef[] {
+  const dice: SeventhDieRef[] = [];
+  const originalValue = state.flags.seventhValues.original;
+  const portraitValue = state.flags.seventhValues.portrait;
+  if (hasOwnedJoker(state, "7th") && isValidDieFace(originalValue)) {
+    dice.push({ source: "original", value: originalValue });
+  }
+  if (getActivePortraitCopy(state) === "7th" && isValidDieFace(portraitValue)) {
+    dice.push({ source: "portrait", value: portraitValue });
+  }
+  return dice;
+}
+
+export function getActiveSeventhValues(state: SaveData): number[] {
+  return getActiveSeventhDice(state).map((die) => die.value);
+}
+
+function diceOnlyHighPattern(values: number[], discount = false): boolean {
+  return straightScore(values, discount) > 0 || (values.length === 6 && threePairsScore(values) > 0);
+}
+
+function seventhValuesForPattern(realValues: number[], seventhValues: number[], discount = false): number[] {
+  if (diceOnlyHighPattern(realValues, discount)) {
+    return [];
+  }
+  return seventhValues;
+}
+
+function canCompleteTargetWithSeventh(realValues: number[], seventhValues: number[], target: number[]): boolean {
+  const realCounts = countsFor(realValues);
+  const seventhCounts = countsFor(seventhValues);
+  const targetCounts = countsFor(target);
+  for (let value = 1; value <= 6; value += 1) {
+    if (realCounts[value] > targetCounts[value]) {
+      return false;
+    }
+    if (targetCounts[value] - realCounts[value] > seventhCounts[value]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function seventhStraightTarget(realValues: number[], seventhValues: number[], discount = false): number[] | null {
+  const targets = [
+    [1, 2, 3, 4, 5, 6],
+    ...(discount ? [[1, 2, 3, 4, 5], [2, 3, 4, 5, 6]] : [])
+  ];
+  return targets.find((target) => canCompleteTargetWithSeventh(realValues, seventhValues, target)) ?? null;
+}
+
+function seventhThreePairsTarget(realValues: number[], seventhValues: number[]): number[] | null {
+  if (realValues.length >= 6 || realValues.length + seventhValues.length < 6) {
+    return null;
+  }
+
+  const subsetCount = 6 - realValues.length;
+  const subsets =
+    subsetCount === 1
+      ? seventhValues.map((value) => [value])
+      : subsetCount === 2
+        ? seventhValues.flatMap((first, firstIndex) =>
+            seventhValues.slice(firstIndex + 1).map((second) => [first, second])
+          )
+        : [];
+  return subsets.map((subset) => [...realValues, ...subset]).find((values) => threePairsScore(values) > 0) ?? null;
+}
+
+function targetUsesSeventh(realValues: number[], target: number[]): boolean {
+  const realCounts = countsFor(realValues);
+  const targetCounts = countsFor(target);
+  return targetCounts.some((count, value) => count > realCounts[value]);
+}
+
+function seventhWholeHandIndices(
+  values: number[],
+  locked: boolean[],
+  disabled: boolean[],
+  lockedPheonixValues: number[],
+  seventhValues: number[],
+  discount = false
+): Set<number> | null {
+  const activeDice = values
+    .map((value, index) => ({ value, index }))
+    .filter((die) => !locked[die.index] && !disabled[die.index]);
+  let best: Set<number> | null = null;
+
+  for (let mask = 1; mask < 2 ** activeDice.length; mask += 1) {
+    const selectedDice = activeDice.filter((_, activeIndex) => (mask & (1 << activeIndex)) !== 0);
+    if (best && selectedDice.length <= best.size) {
+      continue;
+    }
+
+    const realValues = [...selectedDice.map((die) => die.value), ...lockedPheonixValues];
+    const effectiveSeventhValues = activeSeventhValuesForRealPattern(realValues, seventhValues, discount);
+    const target = seventhStraightTarget(realValues, effectiveSeventhValues, discount) ?? seventhThreePairsTarget(realValues, effectiveSeventhValues);
+    if (!target || !targetUsesSeventh(realValues, target)) {
+      continue;
+    }
+
+    best = new Set(selectedDice.map((die) => die.index));
+  }
+
+  return best;
+}
+
+function activeSeventhValuesForRealPattern(realValues: number[], seventhValues: number[], discount = false): number[] {
+  return seventhValuesForPattern(realValues, seventhValues, discount);
+}
 
 function activeDieRefs(dice: DiceState): ScoringDieRef[] {
   return dice.values
@@ -287,7 +502,8 @@ function getValuesUpgradeMultiplier(
   upgrades: UpgradeState,
   values: number[],
   scholarSourceDice: ScoringDieRef[] = [],
-  diceTypes: SpecialDieId[] = []
+  diceTypes: SpecialDieId[] = [],
+  evenLevelBonus = 0
 ): number {
   const uniqueValues = new Set(values);
   const scholarBonusLevels = scholarSourceDice.reduce((counts, die) => {
@@ -297,7 +513,8 @@ function getValuesUpgradeMultiplier(
     return counts;
   }, Array(7).fill(0) as number[]);
   return [...uniqueValues].reduce((multiplier, value) => {
-    const level = (upgrades.faceUpgradeLevels?.[value] ?? 0) + (scholarBonusLevels[value] ?? 0);
+    const evenlyBonus = value % 2 === 0 ? evenLevelBonus : 0;
+    const level = (upgrades.faceUpgradeLevels?.[value] ?? 0) + (scholarBonusLevels[value] ?? 0) + evenlyBonus;
     return multiplier * FACE_UPGRADE_SCALE ** level;
   }, 1);
 }
@@ -312,6 +529,86 @@ function countsFor(values: number[]): number[] {
     counts[value] += 1;
   }
   return counts;
+}
+
+function isJokerFace(type: SpecialDieId | undefined, value: number): boolean {
+  return type === "joker" && value === 1;
+}
+
+function jokerFaceCount(dice: PatternDieRef[]): number {
+  return dice.filter((die) => isJokerFace(die.type, die.value)).length;
+}
+
+function nonJokerValues(dice: PatternDieRef[]): number[] {
+  return dice.filter((die) => !isJokerFace(die.type, die.value)).map((die) => die.value);
+}
+
+function jokerAwareStraightTarget(dice: PatternDieRef[], discount = false): number[] | null {
+  const targets = [
+    [1, 2, 3, 4, 5, 6],
+    ...(discount ? [[1, 2, 3, 4, 5], [2, 3, 4, 5, 6]] : [])
+  ];
+  const jokerCount = jokerFaceCount(dice);
+  const realValues = nonJokerValues(dice);
+  return (
+    targets.find((target) => {
+      if (dice.length !== target.length) {
+        return false;
+      }
+      const realCounts = countsFor(realValues);
+      if (realCounts.some((count) => count > 1)) {
+        return false;
+      }
+      const missingCount = target.filter((value) => realCounts[value] === 0).length;
+      return realValues.every((value) => target.includes(value)) && missingCount === jokerCount;
+    }) ?? null
+  );
+}
+
+function jokerAwareThreePairsTarget(dice: PatternDieRef[]): number[] | null {
+  if (dice.length !== 6) {
+    return null;
+  }
+  const jokerCount = jokerFaceCount(dice);
+  const realCounts = countsFor(nonJokerValues(dice));
+  for (let a = 1; a <= 4; a += 1) {
+    for (let b = a + 1; b <= 5; b += 1) {
+      for (let c = b + 1; c <= 6; c += 1) {
+        const target = [a, a, b, b, c, c];
+        const targetFaces = new Set([a, b, c]);
+        if (realCounts.some((count, value) => value >= 1 && (count > 2 || (count > 0 && !targetFaces.has(value))))) {
+          continue;
+        }
+        const missingCount = [a, b, c].reduce((sum, value) => sum + Math.max(0, 2 - realCounts[value]), 0);
+        if (missingCount === jokerCount) {
+          return target;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function jokerAwareBestKindTarget(dice: PatternDieRef[]): { value: number; count: number } | null {
+  const jokerCount = jokerFaceCount(dice);
+  if (jokerCount <= 0) {
+    return null;
+  }
+  const realCounts = countsFor(nonJokerValues(dice));
+  let best: { value: number; count: number; score: number } | null = null;
+  for (let value = 1; value <= 6; value += 1) {
+    const count = realCounts[value] + jokerCount;
+    if (realCounts[value] <= 0 || count < 3) {
+      continue;
+    }
+    const baseTriple = value === 1 ? 1000 : value * 100;
+    const kindMultiplier = count === 3 ? 1 : count === 4 ? 2 : count === 5 ? 3 : 4;
+    const score = baseTriple * kindMultiplier;
+    if (!best || score > best.score) {
+      best = { value, count, score };
+    }
+  }
+  return best ? { value: best.value, count: best.count } : null;
 }
 
 function straightScore(values: number[], discount = false): number {
@@ -372,20 +669,32 @@ function getHoldEmScoringIndices(
 function snakeEyesBonusScore(
   state: SaveData,
   selectedIndices: Array<{ value: number; index: number }>,
-  singleOneScoreAlreadyCounted: number
+  singleOneScoreAlreadyCounted: number,
+  virtualOneCount = 0
 ): number {
   const snakeEyesCount = getJokerCount(state, "snake-eyes");
   if (snakeEyesCount <= 0) {
     return 0;
   }
 
-  const oneIndices = selectedIndices.filter((die) => die.value === 1).map((die) => die.index);
-  if (oneIndices.length !== 2) {
+  const oneIndices = selectedIndices
+    .filter((die) => die.value === 1 && !isJokerFace(state.dice.types[die.index], die.value))
+    .map((die) => die.index);
+  if (oneIndices.length + virtualOneCount !== 2 || oneIndices.length <= 0) {
     return 0;
   }
 
   const targetMultiplier = 4 ** snakeEyesCount;
-  const upgradeMultiplier = getValuesUpgradeMultiplier(state.upgrades, [1], activeDieRefs(state.dice), state.dice.types);
+  const upgradeMultiplier = getValuesUpgradeMultiplier(
+    state.upgrades,
+    [1],
+    activeDieRefs(state.dice),
+    state.dice.types,
+    getJokerCount(state, "evenly")
+  );
+  if (virtualOneCount > 0) {
+    return Math.max(0, Math.round(200 * targetMultiplier * upgradeMultiplier) - singleOneScoreAlreadyCounted);
+  }
   if (singleOneScoreAlreadyCounted > 0) {
     return singleOneScoreAlreadyCounted * (targetMultiplier - 1);
   }
@@ -480,6 +789,7 @@ export function createInitialState(): SaveData {
       foresightNext: openingRoll.foresightNext,
       anchorFixed: openingRoll.anchorFixed,
       chargedUsed: Array(6).fill(false),
+      blinkMode: 2,
       disabled: Array(6).fill(false),
       selected: Array(6).fill(false),
       locked: Array(6).fill(false),
@@ -512,6 +822,10 @@ export function createInitialState(): SaveData {
       dualityStacks: {
         original: 0,
         portrait: 0
+      },
+      seventhValues: {
+        original: null,
+        portrait: null
       }
     }
   };
@@ -544,6 +858,7 @@ export function migrateSave(save: SaveData | null): SaveData {
       foresightNext: normalizeForesightNext(save.dice.foresightNext ?? initial.dice.foresightNext),
       anchorFixed: normalizeAnchorFixed(save.dice.anchorFixed ?? initial.dice.anchorFixed),
       chargedUsed: normalizeChargedUsed(save.dice.chargedUsed ?? initial.dice.chargedUsed),
+      blinkMode: normalizeBlinkMode(save.dice.blinkMode),
       disabled: save.dice.disabled ?? initial.dice.disabled
     },
     run: {
@@ -573,6 +888,10 @@ export function migrateSave(save: SaveData | null): SaveData {
       dualityStacks: {
         ...initial.flags.dualityStacks,
         ...save.flags.dualityStacks
+      },
+      seventhValues: {
+        ...initial.flags.seventhValues,
+        ...save.flags.seventhValues
       }
     },
     version: SAVE_VERSION,
@@ -588,22 +907,31 @@ export function getScoringIndices(
   disabled: boolean[] = [],
   holdEm = false,
   oddChoice = false,
-  diceTypes: SpecialDieId[] = []
+  diceTypes: SpecialDieId[] = [],
+  seventhValues: number[] = []
 ): Set<number> {
   const indices = new Set<number>();
-  const active = values.filter((_, index) => !locked[index] && !disabled[index]);
-  const lockedPheonixValues = values.filter(
-    (_, index) =>
-      diceTypes[index] === "pheonix" &&
-      locked[index] &&
-      !disabled[index]
-  );
-  const patternValues = [...active, ...lockedPheonixValues];
+  const activeDice = values
+    .map((value, index) => ({ value, index, type: diceTypes[index] ?? "basic" }))
+    .filter((die) => !locked[die.index] && !disabled[die.index]);
+  const active = activeDice.map((die) => die.value);
+  const lockedPheonixDice = values
+    .map((value, index) => ({ value, index, type: diceTypes[index] ?? "basic" }))
+    .filter((die) => diceTypes[die.index] === "pheonix" && locked[die.index] && !disabled[die.index]);
+  const lockedPheonixValues = lockedPheonixDice.map((die) => die.value);
+  const realPatternValues = [...active, ...lockedPheonixValues];
+  const realPatternDice = [...activeDice, ...lockedPheonixDice];
+  const effectiveSeventhValues = activeSeventhValuesForRealPattern(realPatternValues, seventhValues, discount);
+  const patternValues = [...realPatternValues, ...effectiveSeventhValues];
+  const jokerStraight = jokerAwareStraightTarget(realPatternDice, discount);
+  const jokerThreePairs = jokerAwareThreePairsTarget(realPatternDice);
 
   if (
-    (patternValues.length === 6 &&
-      (straightScore(patternValues, discount) > 0 || threePairsScore(patternValues) > 0)) ||
-    straightScore(patternValues, discount) > 0
+    (realPatternValues.length === 6 &&
+      (straightScore(realPatternValues, discount) > 0 || threePairsScore(realPatternValues) > 0)) ||
+    straightScore(realPatternValues, discount) > 0 ||
+    !!jokerStraight ||
+    !!jokerThreePairs
   ) {
     values.forEach((_, index) => {
       if (!locked[index] && !disabled[index]) {
@@ -613,12 +941,24 @@ export function getScoringIndices(
     return indices;
   }
 
+  const seventhWholeHand = seventhWholeHandIndices(values, locked, disabled, lockedPheonixValues, effectiveSeventhValues, discount);
+  if (seventhWholeHand) {
+    seventhWholeHand.forEach((index) => indices.add(index));
+    return indices;
+  }
+
   const counts = countsFor(patternValues);
+  const jokerKind = jokerAwareBestKindTarget(realPatternDice);
   values.forEach((value, index) => {
     if (locked[index] || disabled[index]) {
       return;
     }
-    if (value === 1 || value === 5 || (oddChoice && value === 3) || counts[value] >= 3) {
+    const type = diceTypes[index] ?? "basic";
+    const jokerFace = isJokerFace(type, value);
+    if (
+      (!jokerFace && (value === 1 || value === 5 || (oddChoice && value === 3) || counts[value] >= 3)) ||
+      (jokerKind && (jokerFace || value === jokerKind.value))
+    ) {
       indices.add(index);
     }
   });
@@ -657,7 +997,8 @@ export function hasHoldEmSelectionConflict(state: SaveData): boolean {
     state.dice.disabled,
     false,
     hasJoker(state, "odd-choice"),
-    state.dice.types
+    state.dice.types,
+    getActiveSeventhValues(state)
   );
   return basicIndices.size > 0;
 }
@@ -668,37 +1009,92 @@ export function hasAnyScoringDice(
   discount = false,
   holdEm = false,
   oddChoice = false,
-  lockedPheonixValues: number[] = []
+  lockedPheonixValues: number[] = [],
+  seventhValues: number[] = [],
+  diceTypes: SpecialDieId[] = []
 ): boolean {
-  const patternValues = [...values, ...lockedPheonixValues];
+  const realPatternValues = [...values, ...lockedPheonixValues];
+  const realPatternDice = [
+    ...values.map((value, index) => ({ value, index, type: diceTypes[index] ?? "basic" })),
+    ...lockedPheonixValues.map((value, index) => ({ value, index: values.length + index, type: "basic" as SpecialDieId }))
+  ];
   if (
-    (patternValues.length === 6 &&
-      (straightScore(patternValues, discount) > 0 || threePairsScore(patternValues) > 0)) ||
-    straightScore(patternValues, discount) > 0 ||
-    (holdEm && patternValues.length === 5 && fullHouseScore(patternValues) > 0)
+    (realPatternValues.length === 6 &&
+      (straightScore(realPatternValues, discount) > 0 || threePairsScore(realPatternValues) > 0)) ||
+    straightScore(realPatternValues, discount) > 0 ||
+    !!jokerAwareStraightTarget(realPatternDice, discount) ||
+    !!jokerAwareThreePairsTarget(realPatternDice) ||
+    (holdEm && realPatternValues.length === 5 && fullHouseScore(realPatternValues) > 0)
   ) {
     return true;
   }
-  if (holdEm && hasTwoPairs(patternValues)) {
+  if (holdEm && hasTwoPairs(realPatternValues)) {
+    return true;
+  }
+
+  const effectiveSeventhValues = activeSeventhValuesForRealPattern(realPatternValues, seventhValues, discount);
+  const patternValues = [...realPatternValues, ...effectiveSeventhValues];
+  if (
+    seventhWholeHandIndices(
+      values,
+      Array(values.length).fill(false),
+      Array(values.length).fill(false),
+      lockedPheonixValues,
+      effectiveSeventhValues,
+      discount
+    )
+  ) {
     return true;
   }
 
   const counts = countsFor(patternValues);
   const activeCounts = countsFor(values);
+  const jokerKind = jokerAwareBestKindTarget(realPatternDice);
   const hasKind = counts.some(
     (count, value) =>
       activeCounts[value] > 0 && count >= 3
-  );
+  ) || !!jokerKind;
   const hasActiveSingle = values.some(
-    (value) => value === 1 || value === 5 || (oddChoice && value === 3)
+    (value, index) => !isJokerFace(diceTypes[index], value) && (value === 1 || value === 5 || (oddChoice && value === 3))
   );
   return hasKind || hasActiveSingle;
 }
 
 export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
-  const selectedValues = state.dice.values.filter((_, index) => state.dice.selected[index]);
+  const selectedDice = state.dice.values
+    .map((value, index) => ({ value, index, type: state.dice.types[index] ?? "basic" }))
+    .filter((die) => state.dice.selected[die.index]);
+  const selectedValues = selectedDice.map((die) => die.value);
+  const selectedNonJokerValues = selectedDice.filter((die) => !isJokerFace(die.type, die.value)).map((die) => die.value);
   const lockedPheonixValues = getLockedPheonixValues(state.dice);
-  const patternValues = [...selectedValues, ...lockedPheonixValues];
+  const lockedPheonixDice = state.dice.values
+    .map((value, index) => ({ value, index, type: state.dice.types[index] ?? "basic" }))
+    .filter((die) => state.dice.types[die.index] === "pheonix" && state.dice.locked[die.index] && !state.dice.disabled[die.index]);
+  const realPatternValues = [...selectedValues, ...lockedPheonixValues];
+  const realPatternDice = [...selectedDice, ...lockedPheonixDice];
+  const activeRealPatternValues = [...activeValues(state.dice), ...lockedPheonixValues];
+  const activeSeventhValues = getActiveSeventhValues(state);
+  const effectiveSeventhValues = diceOnlyHighPattern(activeRealPatternValues, hasJoker(state, "discount"))
+    ? []
+    : activeSeventhValuesForRealPattern(realPatternValues, activeSeventhValues, hasJoker(state, "discount"));
+  const seventhStraight = seventhStraightTarget(realPatternValues, effectiveSeventhValues, hasJoker(state, "discount"));
+  const seventhThreePairs = seventhThreePairsTarget(realPatternValues, effectiveSeventhValues);
+  const jokerStraight = jokerAwareStraightTarget(realPatternDice, hasJoker(state, "discount"));
+  const jokerThreePairs = jokerAwareThreePairsTarget(realPatternDice);
+  const jokerKind = jokerAwareBestKindTarget(realPatternDice);
+  const patternValues =
+    seventhStraight ??
+    seventhThreePairs ??
+    jokerStraight ??
+    jokerThreePairs ??
+    (jokerKind
+      ? [
+          ...realPatternValues.map((value, index) =>
+            isJokerFace(realPatternDice[index]?.type, value) ? jokerKind.value : value
+          ),
+          ...effectiveSeventhValues
+        ]
+      : [...realPatternValues, ...effectiveSeventhValues]);
   const selectedIndices = state.dice.values
     .map((value, index) => ({ value, index }))
     .filter((die) => state.dice.selected[die.index]);
@@ -707,7 +1103,7 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   }
   const upgradeSourceDice = activeDieRefs(state.dice);
   const upgradeMultiplierFor = (values: number[]) =>
-    getValuesUpgradeMultiplier(state.upgrades, values, upgradeSourceDice, state.dice.types);
+    getValuesUpgradeMultiplier(state.upgrades, values, upgradeSourceDice, state.dice.types, getJokerCount(state, "evenly"));
 
   const discountStraight = hasJoker(state, "discount");
   const oddChoiceCount = getJokerCount(state, "odd-choice");
@@ -715,7 +1111,10 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   const copiedDiscount = activePortraitCopy === "discount";
   const copiedHoldEm = activePortraitCopy === "hold-em";
   const patternCounts = countsFor(patternValues);
-  const remainingSelectedCounts = countsFor(selectedValues);
+  const remainingSelectedCounts = countsFor(selectedNonJokerValues);
+  if (jokerKind) {
+    remainingSelectedCounts[jokerKind.value] += jokerFaceCount(realPatternDice);
+  }
   let score = 0;
   const labels: string[] = [];
   let flatBonus = 0;
@@ -727,9 +1126,9 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
 
   const straight = straightScore(patternValues, discountStraight);
   const threePairs = patternValues.length === 6 ? threePairsScore(patternValues) : 0;
-  const fullHouse = hasJoker(state, "hold-em") && patternValues.length === 5 ? fullHouseScore(patternValues) : 0;
+  const fullHouse = hasJoker(state, "hold-em") && realPatternValues.length === 5 ? fullHouseScore(realPatternValues) : 0;
   const twoPairValues = hasJoker(state, "hold-em")
-    ? patternCounts.map((count, value) => ({ count, value })).filter(({ count }) => count === 2).map(({ value }) => value)
+    ? countsFor(realPatternValues).map((count, value) => ({ count, value })).filter(({ count }) => count === 2).map(({ value }) => value)
     : [];
 
   if (straight > 0) {
@@ -768,7 +1167,7 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
     }
 
     const singleOneIndices = selectedIndices
-      .filter((die) => die.value === 1)
+      .filter((die) => die.value === 1 && !isJokerFace(state.dice.types[die.index], die.value))
       .slice(0, remainingSelectedCounts[1])
       .map((die) => die.index);
     singleOneScoreAlreadyCounted = singleOneIndices.reduce((sum, index) => {
@@ -836,7 +1235,12 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   }
 
   score += flatBonus;
-  const snakeEyesBonus = snakeEyesBonusScore(state, selectedIndices, singleOneScoreAlreadyCounted);
+  const snakeEyesBonus = snakeEyesBonusScore(
+    state,
+    selectedIndices,
+    singleOneScoreAlreadyCounted,
+    effectiveSeventhValues.filter((value) => value === 1).length
+  );
   if (snakeEyesBonus > 0) {
     score += snakeEyesBonus;
     labels.push("Snake Eyes");
@@ -862,6 +1266,23 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   if (selectedIndices.some((die) => state.dice.types[die.index] === "glass")) {
     multiplier *= 5;
   }
+  const selectedIndexSet = new Set(selectedIndices.map((die) => die.index));
+  const teamworkTriggerCount = selectedIndices.filter(
+    (die) => state.dice.types[die.index] === "teamwork" && selectedIndexSet.has(OPPOSITE_DIE_INDICES[die.index])
+  ).length;
+  if (teamworkTriggerCount > 0) {
+    multiplier *= 2 ** teamworkTriggerCount;
+    labels.push("Teamwork");
+  }
+  const selectedCount = Math.max(1, Math.min(6, selectedIndices.length));
+  const blinkMode = normalizeBlinkMode(state.dice.blinkMode);
+  const activeBlinkCount = getActiveBlinkCount(state.dice);
+  if (activeBlinkCount > 0 && blinkMode !== 3) {
+    const blinkMultiplier =
+      blinkMode === 1 ? BLINK_MULTIPLIERS[6 - selectedCount] : BLINK_MULTIPLIERS[selectedCount - 1];
+    multiplier *= blinkMultiplier ** activeBlinkCount;
+    labels.push("Blink");
+  }
   const greedyCount = getJokerCount(state, "greedy");
   if (greedyCount > 0) {
     multiplier *= getGreedyMultiplier(state.dice.rollCount) ** greedyCount;
@@ -881,11 +1302,11 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   if (doubleOrNothingCount > 0 && state.run.turnNumber === 1) {
     multiplier *= 2 ** doubleOrNothingCount;
   }
-  if (hasOwnedJoker(state, "duality") && state.flags.dualityStacks.original > 0) {
-    multiplier *= 2 ** state.flags.dualityStacks.original;
-  }
-  if (getActivePortraitCopy(state) === "duality" && state.flags.dualityStacks.portrait > 0) {
-    multiplier *= 2 ** state.flags.dualityStacks.portrait;
+  const dualityActive =
+    (hasOwnedJoker(state, "duality") && state.flags.dualityStacks.original > 0) ||
+    (getActivePortraitCopy(state) === "duality" && state.flags.dualityStacks.portrait > 0);
+  if (dualityActive) {
+    multiplier *= 2;
   }
 
   return {
@@ -894,6 +1315,55 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
     label: labels.join(", "),
     multiplier,
     flatBonus
+  };
+}
+
+export function selectionUsesSeventh(state: SaveData): { original: boolean; portrait: boolean } {
+  const selectedValues = state.dice.values.filter((_, index) => state.dice.selected[index]);
+  if (selectedValues.length === 0) {
+    return { original: false, portrait: false };
+  }
+
+  const lockedPheonixValues = getLockedPheonixValues(state.dice);
+  const realPatternValues = [...selectedValues, ...lockedPheonixValues];
+  const activeRealPatternValues = [...activeValues(state.dice), ...lockedPheonixValues];
+  const seventhDice = getActiveSeventhDice(state);
+  const effectiveSeventhValues = diceOnlyHighPattern(activeRealPatternValues, hasJoker(state, "discount"))
+    ? []
+    : activeSeventhValuesForRealPattern(
+        realPatternValues,
+        seventhDice.map((die) => die.value),
+        hasJoker(state, "discount")
+      );
+  if (effectiveSeventhValues.length === 0) {
+    return { original: false, portrait: false };
+  }
+
+  const selectedCounts = countsFor(realPatternValues);
+  const seventhCounts = countsFor(effectiveSeventhValues);
+  const usesByValue = Array(7).fill(false) as boolean[];
+  const straightTarget = seventhStraightTarget(realPatternValues, effectiveSeventhValues, hasJoker(state, "discount"));
+  const threePairsTarget = seventhThreePairsTarget(realPatternValues, effectiveSeventhValues);
+  if (straightTarget || threePairsTarget) {
+    const targetCounts = countsFor(straightTarget ?? threePairsTarget ?? []);
+    for (let value = 1; value <= 6; value += 1) {
+      usesByValue[value] = targetCounts[value] > selectedCounts[value];
+    }
+  }
+
+  for (let value = 1; value <= 6; value += 1) {
+    if (selectedCounts[value] > 0 && selectedCounts[value] + seventhCounts[value] >= 3) {
+      usesByValue[value] = true;
+    }
+  }
+
+  if (selectedCounts[1] > 0 && selectedCounts[1] + seventhCounts[1] === 2 && getJokerCount(state, "snake-eyes") > 0) {
+    usesByValue[1] = true;
+  }
+
+  return {
+    original: seventhDice.some((die) => die.source === "original" && usesByValue[die.value]),
+    portrait: seventhDice.some((die) => die.source === "portrait" && usesByValue[die.value])
   };
 }
 
@@ -942,15 +1412,18 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
         anchorFixedForRoll
       )
     : rollDiceValues(next.dice.types, next.dice.foresightNext, rollMask, next.dice.values, anchorFixedForRoll, hasJoker(next, "odd-choice"));
+  advanceBlinkModeForRoll(next.dice, rollMask);
   next.dice.values = roll.values;
   next.dice.foresightNext = roll.foresightNext;
   next.dice.anchorFixed = roll.anchorFixed;
+  rollSeventhValues(next);
   next.dice.selected.fill(false);
   next.dice.rollCount += 1;
   next.dice.awaitingAction = true;
   next.updatedAt = Date.now();
 
   const active = activeValues(next.dice);
+  const activeTypes = next.dice.types.filter((_, index) => !next.dice.locked[index] && !next.dice.disabled[index]);
   if (
     !options.deferFarkle &&
     !hasAnyScoringDice(
@@ -959,7 +1432,9 @@ export function rollDice(state: SaveData, options: { deferFarkle?: boolean } = {
       hasJoker(next, "discount"),
       hasJoker(next, "hold-em"),
       hasJoker(next, "odd-choice"),
-      getLockedPheonixValues(next.dice)
+      getLockedPheonixValues(next.dice),
+      getActiveSeventhValues(next),
+      activeTypes
     )
   ) {
     return handleFarkle(next);
@@ -988,6 +1463,7 @@ export function rerollSingleDieValue(state: SaveData, index: number): SaveData {
     next.dice.anchorFixed,
     hasJoker(next, "odd-choice")
   );
+  advanceBlinkModeForRoll(next.dice, next.dice.values.map((_, diceIndex) => diceIndex === index));
   next.dice.values = roll.values;
   next.dice.foresightNext = roll.foresightNext;
   next.dice.anchorFixed = roll.anchorFixed;
@@ -1009,7 +1485,8 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
     next.dice.disabled,
     hasJoker(next, "hold-em"),
     hasJoker(next, "odd-choice"),
-    next.dice.types
+    next.dice.types,
+    getActiveSeventhValues(next)
   );
   if (!scoringIndices.has(index)) {
     return next;
@@ -1020,21 +1497,48 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
   }
 
   const active = activeValues(next.dice);
-  const patternValues = [...active, ...getLockedPheonixValues(next.dice)];
+  const realPatternValues = [...active, ...getLockedPheonixValues(next.dice)];
+  const realPatternDice = [
+    ...next.dice.values
+      .map((value, diceIndex) => ({ value, index: diceIndex, type: next.dice.types[diceIndex] ?? "basic" }))
+      .filter((die) => !next.dice.locked[die.index] && !next.dice.disabled[die.index]),
+    ...next.dice.values
+      .map((value, diceIndex) => ({ value, index: diceIndex, type: next.dice.types[diceIndex] ?? "basic" }))
+      .filter((die) => next.dice.types[die.index] === "pheonix" && next.dice.locked[die.index] && !next.dice.disabled[die.index])
+  ];
+  const effectiveSeventhValues = activeSeventhValuesForRealPattern(
+    realPatternValues,
+    getActiveSeventhValues(next),
+    hasJoker(next, "discount")
+  );
+  const patternValues = [...realPatternValues, ...effectiveSeventhValues];
   const counts = countsFor(patternValues);
+  const realCounts = countsFor(realPatternValues);
   const clickedValue = next.dice.values[index];
+  const clickedIsJokerFace = isJokerFace(next.dice.types[index], clickedValue);
   const clickedValueScoresAlone =
-    clickedValue === 1 ||
+    (!clickedIsJokerFace && clickedValue === 1) ||
     clickedValue === 5 ||
     (hasJoker(next, "odd-choice") && clickedValue === 3);
+  const seventhWholeHand = seventhWholeHandIndices(
+    next.dice.values,
+    next.dice.locked,
+    next.dice.disabled,
+    getLockedPheonixValues(next.dice),
+    effectiveSeventhValues,
+    hasJoker(next, "discount")
+  );
   const wholeHandScore =
-    straightScore(patternValues, hasJoker(next, "discount")) > 0 ||
-    (hasJoker(next, "hold-em") && patternValues.length === 5 && fullHouseScore(patternValues) > 0);
+    straightScore(realPatternValues, hasJoker(next, "discount")) > 0 ||
+    !!jokerAwareStraightTarget(realPatternDice, hasJoker(next, "discount")) ||
+    (hasJoker(next, "hold-em") && realPatternValues.length === 5 && fullHouseScore(realPatternValues) > 0) ||
+    !!seventhWholeHand;
   const pairOnlyScore =
-    ((patternValues.length === 6 && threePairsScore(patternValues) > 0) ||
-      (hasJoker(next, "hold-em") && hasTwoPairs(patternValues))) &&
+    ((realPatternValues.length === 6 && threePairsScore(realPatternValues) > 0) ||
+      !!jokerAwareThreePairsTarget(realPatternDice) ||
+      (hasJoker(next, "hold-em") && hasTwoPairs(realPatternValues))) &&
     !clickedValueScoresAlone &&
-    counts[clickedValue] === 2;
+    realCounts[clickedValue] === 2;
 
   if (wholeHandScore || pairOnlyScore) {
     const shouldSelect = next.dice.values.some(
@@ -1042,23 +1546,32 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
         !next.dice.locked[diceIndex] &&
         !next.dice.disabled[diceIndex] &&
         !next.dice.selected[diceIndex] &&
-        (!pairOnlyScore || counts[value] === 2)
+        (!seventhWholeHand || seventhWholeHand.has(diceIndex)) &&
+        (!pairOnlyScore || realCounts[value] === 2)
     );
     next.dice.selected = next.dice.selected.map((selected, diceIndex) =>
       next.dice.locked[diceIndex] ||
       next.dice.disabled[diceIndex] ||
-      (pairOnlyScore && counts[next.dice.values[diceIndex]] !== 2)
+      (seventhWholeHand && !seventhWholeHand.has(diceIndex)) ||
+      (pairOnlyScore && realCounts[next.dice.values[diceIndex]] !== 2)
         ? selected
         : shouldSelect
     );
     return next;
   }
 
-  const kindOnlyScore = !clickedValueScoresAlone && counts[clickedValue] >= 3;
+  const jokerKind = jokerAwareBestKindTarget(realPatternDice);
+  const kindOnlyScore = !clickedValueScoresAlone && (counts[clickedValue] >= 3 || !!jokerKind);
   if (kindOnlyScore) {
     const matchingIndices = next.dice.values
       .map((value, diceIndex) => ({ value, diceIndex }))
-      .filter((die) => !next.dice.locked[die.diceIndex] && !next.dice.disabled[die.diceIndex] && die.value === clickedValue)
+      .filter((die) => {
+        if (next.dice.locked[die.diceIndex] || next.dice.disabled[die.diceIndex]) {
+          return false;
+        }
+        const targetValue = jokerKind?.value ?? clickedValue;
+        return die.value === targetValue || isJokerFace(next.dice.types[die.diceIndex], die.value);
+      })
       .map((die) => die.diceIndex);
     const shouldSelect = matchingIndices.some((diceIndex) => !next.dice.selected[diceIndex]);
     matchingIndices.forEach((diceIndex) => {
@@ -1092,6 +1605,12 @@ export function confirmSelection(state: SaveData): SaveData {
         next.dice.disabled[index] = true;
       } else if (next.dice.types[index] === "charged" && !hotDiceTriggered && !next.dice.chargedUsed[index]) {
         next.dice.chargedUsed[index] = true;
+      } else if (
+        next.dice.types[index] === "ghost" &&
+        !hotDiceTriggered &&
+        (next.dice.values[index] === 1 || next.dice.values[index] === 5)
+      ) {
+        next.dice.locked[index] = false;
       } else {
         next.dice.locked[index] = true;
       }
@@ -1153,6 +1672,11 @@ function startNextTurn(state: SaveData, awaitingAction = false): SaveData {
         resetAnchorFixed
       )
     : rollDiceValues(previousTypes, previousForesightNext, rollMask, state.dice.values, resetAnchorFixed);
+  const blinkMode = normalizeBlinkMode(state.dice.blinkMode);
+  const nextBlinkModeValue =
+    previousTypes.some((type, index) => type === "blink" && rollMask[index] && !disabled[index])
+      ? nextBlinkMode(blinkMode)
+      : blinkMode;
   state.dice = {
     values: roll.values,
     selected: Array(6).fill(false),
@@ -1161,6 +1685,7 @@ function startNextTurn(state: SaveData, awaitingAction = false): SaveData {
     foresightNext: roll.foresightNext,
     anchorFixed: roll.anchorFixed,
     chargedUsed: Array(6).fill(false),
+    blinkMode: nextBlinkModeValue,
     disabled,
     rollCount: awaitingAction ? 1 : 0,
     hotDice: false,
@@ -1171,6 +1696,9 @@ function startNextTurn(state: SaveData, awaitingAction = false): SaveData {
   state.run.turnScore = 0;
   state.flags.feverCharges = 0;
   state.flags.successfulScoresThisTurn = 0;
+  if (awaitingAction) {
+    rollSeventhValues(state);
+  }
   return state;
 }
 
@@ -1262,7 +1790,9 @@ export function bankScore(state: SaveData): SaveData {
     next.run.money += getJokerCount(next, "tax-refund");
   }
   if (hasJoker(next, "pocket-change") && next.dice.rollCount <= 3) {
-    next.run.money += getJokerCount(next, "pocket-change");
+    const gained = getJokerCount(next, "pocket-change");
+    next.run.money += gained;
+    next.log.unshift(makeLog(`Pocket Change gained $${gained}.`, "good"));
   }
   next.flags.dualityStacks.original = 0;
   next.flags.dualityStacks.portrait = 0;
@@ -1324,10 +1854,10 @@ export function handleFarkle(state: SaveData): SaveData {
 
   next.flags.hadFarkleRound = true;
   if (hasOwnedJoker(next, "duality")) {
-    next.flags.dualityStacks.original += 1;
+    next.flags.dualityStacks.original = 1;
   }
   if (getActivePortraitCopy(next) === "duality") {
-    next.flags.dualityStacks.portrait += 1;
+    next.flags.dualityStacks.portrait = 1;
   }
   next.run.turnScore = 0;
   next.dice.selected.fill(false);
@@ -1393,7 +1923,7 @@ export function generateShop(state: SaveData): ShopItem[] {
       id: makeId(),
       kind: "hand-upgrade" as const,
       refId: upgrade.id,
-      price: getFaceUpgradePrice(state.upgrades, upgrade.id),
+      price: getEffectiveFaceUpgradePrice(state, upgrade.id),
       purchased: false
     }))
   ];
@@ -1403,7 +1933,7 @@ export function buyShopItem(state: SaveData, itemId: string): SaveData {
   const next = cloneState(state);
   const item = next.shop.items.find((candidate) => candidate.id === itemId);
   const price =
-    item?.kind === "hand-upgrade" ? getFaceUpgradePrice(next.upgrades, item.refId as UpgradeId) : item?.price ?? 0;
+    item?.kind === "hand-upgrade" ? getEffectiveFaceUpgradePrice(next, item.refId as UpgradeId) : item?.price ?? 0;
   if (!item || item.purchased || next.run.money < price) {
     return next;
   }
@@ -1457,6 +1987,7 @@ export function buySpecialDieForSlot(state: SaveData, itemId: string, slotIndex:
     return next;
   }
 
+  const hadBlink = next.dice.types.includes("blink");
   next.dice.types[slotIndex] = dieId;
   next.dice.foresightNext = normalizeForesightNext(next.dice.foresightNext);
   next.dice.foresightNext[slotIndex] = null;
@@ -1464,6 +1995,7 @@ export function buySpecialDieForSlot(state: SaveData, itemId: string, slotIndex:
   next.dice.anchorFixed[slotIndex] = false;
   next.dice.chargedUsed = normalizeChargedUsed(next.dice.chargedUsed);
   next.dice.chargedUsed[slotIndex] = false;
+  next.dice.blinkMode = dieId === "blink" && !hadBlink ? 2 : normalizeBlinkMode(next.dice.blinkMode);
   next.dice.disabled[slotIndex] = false;
   item.purchased = true;
   next.run.money -= item.price;

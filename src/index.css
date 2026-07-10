@@ -1277,6 +1277,16 @@ img.market-item-die-image {
   filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.58));
 }
 
+.relic-slot-seventh-die {
+  display: block;
+  width: 82%;
+  aspect-ratio: 1 / 1;
+  background-repeat: no-repeat;
+  background-position: var(--die-sprite-x, 0%) var(--die-sprite-y, 0%);
+  image-rendering: pixelated;
+  filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.58));
+}
+
 .relic-slot.portrait-copy-slot {
   overflow: hidden;
 }

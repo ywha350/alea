@@ -46,7 +46,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "my-bad",
     name: "My bad",
     type: "Control",
-    description: "A non-scoring die rerolls itself.",
+    description: "50% chance to reroll a non-scoring die.",
     price: 5
   },
   {
@@ -186,7 +186,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "duality",
     name: "Duality",
     type: "Farkle multiplier",
-    description: "Farkle adds x2. Resets on Bank.",
+    description: "Farkle enables x2. Resets on Bank.",
     price: 5
   },
   {
@@ -201,6 +201,27 @@ export const JOKERS: JokerDefinition[] = [
     name: "Bargain",
     type: "Turn economy",
     description: "7% chance of -$1 and +1 turn.",
+    price: 5
+  },
+  {
+    id: "7th",
+    name: "7th",
+    type: "Virtual die",
+    description: "Rolls a virtual die that can complete base combos.",
+    price: 5
+  },
+  {
+    id: "evenly",
+    name: "Evenly",
+    type: "Number level",
+    description: "2, 4, and 6 count as +1 level.",
+    price: 5
+  },
+  {
+    id: "on-sale",
+    name: "On Sale",
+    type: "Economy",
+    description: "Number upgrades are 50% off.",
     price: 5
   }
 ];
@@ -291,6 +312,41 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
     description: "Stays in patterns after scoring.",
     price: 7,
     image: assetPath("/dice-pheonix.png")
+  },
+  {
+    id: "teamwork",
+    name: "Teamwork",
+    description: "If selected with its opposite die, this combo scores x2.",
+    price: 6,
+    image: assetPath("/dice-teamwork.png")
+  },
+  {
+    id: "ghost",
+    name: "Ghost",
+    description: "On 1 or 5, stays active after scoring unless Hot Dice triggers.",
+    price: 6,
+    image: assetPath("/dice-ghost.png")
+  },
+  {
+    id: "blink",
+    name: "Blink",
+    description: "Active Blink cycles each roll. Modes 1 and 2 multiply selected combos.",
+    price: 7,
+    image: assetPath("/dice-blink2.png")
+  },
+  {
+    id: "cameleon",
+    name: "Cameleon",
+    description: "After rolling, may copy matching adjacent dice before My bad.",
+    price: 7,
+    image: assetPath("/dice-cameleon.png")
+  },
+  {
+    id: "joker",
+    name: "Joker",
+    description: "Its 1 face is a Joker for kinds, straights, and three pairs.",
+    price: 7,
+    image: assetPath("/dice-joker.png")
   }
 ];
 

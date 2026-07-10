@@ -26,7 +26,10 @@ export type JokerId =
   | "odd-choice"
   | "duality"
   | "wake-up"
-  | "faustian-bargain";
+  | "faustian-bargain"
+  | "7th"
+  | "evenly"
+  | "on-sale";
 
 export type UpgradeId =
   | "one-upgrade"
@@ -48,7 +51,12 @@ export type SpecialDieId =
   | "charged"
   | "scholar"
   | "anchor"
-  | "pheonix";
+  | "pheonix"
+  | "teamwork"
+  | "ghost"
+  | "blink"
+  | "cameleon"
+  | "joker";
 
 export type BossId =
   | "bone-croupier"
@@ -108,6 +116,7 @@ export interface DiceState {
   foresightNext: Array<number | null>;
   anchorFixed: boolean[];
   chargedUsed: boolean[];
+  blinkMode: 1 | 2 | 3;
   disabled: boolean[];
   selected: boolean[];
   locked: boolean[];
@@ -170,6 +179,10 @@ export interface SaveData {
     dualityStacks: {
       original: number;
       portrait: number;
+    };
+    seventhValues: {
+      original: number | null;
+      portrait: number | null;
     };
   };
 }
