@@ -3,7 +3,7 @@
   src: url("/fonts/neodgm.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
-  font-display: swap;
+  font-display: block;
 }
 
 :root {
@@ -1279,7 +1279,7 @@ img.market-item-die-image {
 
 .relic-slot-seventh-die {
   display: block;
-  width: 82%;
+  width: 100%;
   aspect-ratio: 1 / 1;
   background-repeat: no-repeat;
   background-position: var(--die-sprite-x, 0%) var(--die-sprite-y, 0%);

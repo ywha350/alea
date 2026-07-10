@@ -328,7 +328,7 @@ export interface CameleonTransformCandidate {
 
 function getCameleonTargetValue(state: SaveData, index: number): number | null {
   const counts = ORTHOGONAL_DIE_NEIGHBORS[index].reduce((totals, neighborIndex) => {
-    if (!state.dice.disabled[neighborIndex]) {
+    if (!state.dice.locked[neighborIndex] && !state.dice.disabled[neighborIndex]) {
       const value = state.dice.values[neighborIndex];
       totals[value] = (totals[value] ?? 0) + 1;
     }
@@ -1892,7 +1892,7 @@ export function finishFarkleTurn(state: SaveData): SaveData {
 }
 
 export function generateShop(state: SaveData): ShopItem[] {
-  const unavailableJokers = new Set<JokerId>(["lucky-cash", "tax-refund", "just-one-more", "odd-choice"]);
+  const unavailableJokers = new Set<JokerId>(["lucky-cash", "tax-refund", "just-one-more", "odd-choice", "hold-em"]);
   const unavailableSpecialDice = new Set<SpecialDieId>(["zombie", "glass"]);
   const availableJokers = JOKERS.filter((joker) => !unavailableJokers.has(joker.id) && !state.jokers.includes(joker.id));
   const availableSpecialDice = SPECIAL_DICE.filter(

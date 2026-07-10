@@ -1462,11 +1462,12 @@ function App() {
         triggerEffectiveJokerEffect("evenly");
       }
       if (selectedMoreDice) {
-        const seventhUsage = selectionUsesSeventh(next);
-        if (seventhUsage.original) {
+        const previousSeventhUsage = selectionUsesSeventh(state);
+        const nextSeventhUsage = selectionUsesSeventh(next);
+        if (!previousSeventhUsage.original && nextSeventhUsage.original) {
           triggerJokerEffect("7th");
         }
-        if (seventhUsage.portrait) {
+        if (!previousSeventhUsage.portrait && nextSeventhUsage.portrait) {
           triggerJokerEffect("the-portrait");
         }
       }
