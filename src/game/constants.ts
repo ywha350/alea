@@ -207,7 +207,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "7th",
     name: "7th",
     type: "Virtual die",
-    description: "Rolls a virtual die that can complete base combos.",
+    description: "Rolls a virtual die.",
     price: 5
   },
   {
@@ -267,7 +267,7 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
   {
     id: "bloody",
     name: "Bloody",
-    description: "x1.5 turn damage when scored.",
+    description: "x1.5 when selected.",
     price: 6,
     image: assetPath("/dice-bloody.png")
   },
@@ -316,35 +316,35 @@ export const SPECIAL_DICE: SpecialDieDefinition[] = [
   {
     id: "teamwork",
     name: "Teamwork",
-    description: "If selected with its opposite die, this combo scores x2.",
+    description: "If selected with its opposite die, x2.",
     price: 6,
     image: assetPath("/dice-teamwork.png")
   },
   {
     id: "ghost",
     name: "Ghost",
-    description: "On 1 or 5, stays active after scoring unless Hot Dice triggers.",
+    description: "Stays active after 1 or 5.",
     price: 6,
     image: assetPath("/dice-ghost.png")
   },
   {
     id: "blink",
     name: "Blink",
-    description: "Active Blink cycles each roll. Modes 1 and 2 multiply selected combos.",
+    description: "Select more on green, less on red.",
     price: 7,
     image: assetPath("/dice-blink2.png")
   },
   {
     id: "cameleon",
     name: "Cameleon",
-    description: "After rolling, may copy matching adjacent dice before My bad.",
+    description: "May copy 2 matching adjacent dice.",
     price: 7,
     image: assetPath("/dice-cameleon.png")
   },
   {
     id: "joker",
     name: "Joker",
-    description: "Its 1 face is a Joker for kinds, straights, and three pairs.",
+    description: "A joker instead of 1.",
     price: 7,
     image: assetPath("/dice-joker.png")
   }
