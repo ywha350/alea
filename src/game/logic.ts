@@ -543,6 +543,15 @@ function nonJokerValues(dice: PatternDieRef[]): number[] {
   return dice.filter((die) => !isJokerFace(die.type, die.value)).map((die) => die.value);
 }
 
+type JokerKindTarget = { value: number; count: number; score: number };
+
+interface JokerKindScoreContext {
+  upgrades?: UpgradeState;
+  upgradeSourceDice?: ScoringDieRef[];
+  diceTypes?: SpecialDieId[];
+  evenLevelBonus?: number;
+}
+
 function jokerAwareStraightTarget(dice: PatternDieRef[], discount = false): number[] | null {
   const targets = [
     [1, 2, 3, 4, 5, 6],
@@ -589,26 +598,57 @@ function jokerAwareThreePairsTarget(dice: PatternDieRef[]): number[] | null {
   return null;
 }
 
-function jokerAwareBestKindTarget(dice: PatternDieRef[]): { value: number; count: number } | null {
+function scoreJokerKindTarget(
+  dice: PatternDieRef[],
+  value: number,
+  count: number,
+  context: JokerKindScoreContext = {}
+): number {
+  const baseTriple = value === 1 ? 1000 : value * 100;
+  const kindMultiplier = count === 3 ? 1 : count === 4 ? 2 : count === 5 ? 3 : 4;
+  const heavyMultiplier = dice.some((die) => !isJokerFace(die.type, die.value) && die.value === value && die.type === "heavy") ? 2 : 1;
+  const upgradeMultiplier = context.upgrades
+    ? getValuesUpgradeMultiplier(
+        context.upgrades,
+        [value],
+        context.upgradeSourceDice ?? [],
+        context.diceTypes ?? [],
+        context.evenLevelBonus ?? 0
+      )
+    : 1;
+  return Math.round(baseTriple * kindMultiplier * heavyMultiplier * upgradeMultiplier);
+}
+
+function jokerAwareKindCandidates(dice: PatternDieRef[], context: JokerKindScoreContext = {}): JokerKindTarget[] {
   const jokerCount = jokerFaceCount(dice);
   if (jokerCount <= 0) {
-    return null;
+    return [];
   }
   const realCounts = countsFor(nonJokerValues(dice));
-  let best: { value: number; count: number; score: number } | null = null;
+  const candidates: JokerKindTarget[] = [];
   for (let value = 1; value <= 6; value += 1) {
     const count = realCounts[value] + jokerCount;
     if (realCounts[value] <= 0 || count < 3) {
       continue;
     }
-    const baseTriple = value === 1 ? 1000 : value * 100;
-    const kindMultiplier = count === 3 ? 1 : count === 4 ? 2 : count === 5 ? 3 : 4;
-    const score = baseTriple * kindMultiplier;
-    if (!best || score > best.score) {
-      best = { value, count, score };
-    }
+    candidates.push({ value, count, score: scoreJokerKindTarget(dice, value, count, context) });
   }
-  return best ? { value: best.value, count: best.count } : null;
+  return candidates;
+}
+
+function jokerAwareBestKindTarget(dice: PatternDieRef[], context: JokerKindScoreContext = {}): JokerKindTarget | null {
+  return jokerAwareKindCandidates(dice, context).reduce<JokerKindTarget | null>(
+    (best, candidate) => (!best || candidate.score > best.score ? candidate : best),
+    null
+  );
+}
+
+function jokerAwareKindTargetForValue(
+  dice: PatternDieRef[],
+  value: number,
+  context: JokerKindScoreContext = {}
+): JokerKindTarget | null {
+  return jokerAwareKindCandidates(dice, context).find((candidate) => candidate.value === value) ?? null;
 }
 
 function straightScore(values: number[], discount = false): number {
@@ -908,7 +948,8 @@ export function getScoringIndices(
   holdEm = false,
   oddChoice = false,
   diceTypes: SpecialDieId[] = [],
-  seventhValues: number[] = []
+  seventhValues: number[] = [],
+  jokerKindScoreContext: JokerKindScoreContext = {}
 ): Set<number> {
   const indices = new Set<number>();
   const activeDice = values
@@ -948,7 +989,7 @@ export function getScoringIndices(
   }
 
   const counts = countsFor(patternValues);
-  const jokerKind = jokerAwareBestKindTarget(realPatternDice);
+  const jokerKindCandidates = jokerAwareKindCandidates(realPatternDice, jokerKindScoreContext);
   values.forEach((value, index) => {
     if (locked[index] || disabled[index]) {
       return;
@@ -957,7 +998,7 @@ export function getScoringIndices(
     const jokerFace = isJokerFace(type, value);
     if (
       (!jokerFace && (value === 1 || value === 5 || (oddChoice && value === 3) || counts[value] >= 3)) ||
-      (jokerKind && (jokerFace || value === jokerKind.value))
+      (jokerKindCandidates.length > 0 && (jokerFace || jokerKindCandidates.some((candidate) => candidate.value === value)))
     ) {
       indices.add(index);
     }
@@ -1074,6 +1115,13 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   const realPatternDice = [...selectedDice, ...lockedPheonixDice];
   const activeRealPatternValues = [...activeValues(state.dice), ...lockedPheonixValues];
   const activeSeventhValues = getActiveSeventhValues(state);
+  const upgradeSourceDice = activeDieRefs(state.dice);
+  const jokerKindScoreContext: JokerKindScoreContext = {
+    upgrades: state.upgrades,
+    upgradeSourceDice,
+    diceTypes: state.dice.types,
+    evenLevelBonus: getJokerCount(state, "evenly")
+  };
   const effectiveSeventhValues = diceOnlyHighPattern(activeRealPatternValues, hasJoker(state, "discount"))
     ? []
     : activeSeventhValuesForRealPattern(realPatternValues, activeSeventhValues, hasJoker(state, "discount"));
@@ -1081,7 +1129,7 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   const seventhThreePairs = seventhThreePairsTarget(realPatternValues, effectiveSeventhValues);
   const jokerStraight = jokerAwareStraightTarget(realPatternDice, hasJoker(state, "discount"));
   const jokerThreePairs = jokerAwareThreePairsTarget(realPatternDice);
-  const jokerKind = jokerAwareBestKindTarget(realPatternDice);
+  const jokerKind = jokerAwareBestKindTarget(realPatternDice, jokerKindScoreContext);
   const patternValues =
     seventhStraight ??
     seventhThreePairs ??
@@ -1101,7 +1149,6 @@ export function calculateSelectedScore(state: SaveData): ScoreBreakdown {
   if (selectedValues.length === 0) {
     return { valid: false, score: 0, label: "Select scoring dice", multiplier: 1, flatBonus: 0 };
   }
-  const upgradeSourceDice = activeDieRefs(state.dice);
   const upgradeMultiplierFor = (values: number[]) =>
     getValuesUpgradeMultiplier(state.upgrades, values, upgradeSourceDice, state.dice.types, getJokerCount(state, "evenly"));
 
@@ -1486,7 +1533,13 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
     hasJoker(next, "hold-em"),
     hasJoker(next, "odd-choice"),
     next.dice.types,
-    getActiveSeventhValues(next)
+    getActiveSeventhValues(next),
+    {
+      upgrades: next.upgrades,
+      upgradeSourceDice: activeDieRefs(next.dice),
+      diceTypes: next.dice.types,
+      evenLevelBonus: getJokerCount(next, "evenly")
+    }
   );
   if (!scoringIndices.has(index)) {
     return next;
@@ -1514,6 +1567,12 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
   const patternValues = [...realPatternValues, ...effectiveSeventhValues];
   const counts = countsFor(patternValues);
   const realCounts = countsFor(realPatternValues);
+  const jokerKindScoreContext: JokerKindScoreContext = {
+    upgrades: next.upgrades,
+    upgradeSourceDice: activeDieRefs(next.dice),
+    diceTypes: next.dice.types,
+    evenLevelBonus: getJokerCount(next, "evenly")
+  };
   const clickedValue = next.dice.values[index];
   const clickedIsJokerFace = isJokerFace(next.dice.types[index], clickedValue);
   const clickedValueScoresAlone =
@@ -1528,14 +1587,15 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
     effectiveSeventhValues,
     hasJoker(next, "discount")
   );
+  const jokerThreePairs = jokerAwareThreePairsTarget(realPatternDice);
   const wholeHandScore =
     straightScore(realPatternValues, hasJoker(next, "discount")) > 0 ||
     !!jokerAwareStraightTarget(realPatternDice, hasJoker(next, "discount")) ||
+    !!jokerThreePairs ||
     (hasJoker(next, "hold-em") && realPatternValues.length === 5 && fullHouseScore(realPatternValues) > 0) ||
     !!seventhWholeHand;
   const pairOnlyScore =
     ((realPatternValues.length === 6 && threePairsScore(realPatternValues) > 0) ||
-      !!jokerAwareThreePairsTarget(realPatternDice) ||
       (hasJoker(next, "hold-em") && hasTwoPairs(realPatternValues))) &&
     !clickedValueScoresAlone &&
     realCounts[clickedValue] === 2;
@@ -1560,8 +1620,12 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
     return next;
   }
 
-  const jokerKind = jokerAwareBestKindTarget(realPatternDice);
-  const kindOnlyScore = !clickedValueScoresAlone && (counts[clickedValue] >= 3 || !!jokerKind);
+  const defaultJokerKind = jokerAwareBestKindTarget(realPatternDice, jokerKindScoreContext);
+  const clickedJokerKind = clickedIsJokerFace
+    ? defaultJokerKind
+    : jokerAwareKindTargetForValue(realPatternDice, clickedValue, jokerKindScoreContext);
+  const targetJokerKind = clickedJokerKind ?? defaultJokerKind;
+  const kindOnlyScore = !clickedValueScoresAlone && (counts[clickedValue] >= 3 || !!targetJokerKind);
   if (kindOnlyScore) {
     const matchingIndices = next.dice.values
       .map((value, diceIndex) => ({ value, diceIndex }))
@@ -1569,7 +1633,7 @@ export function toggleDieSelection(state: SaveData, index: number): SaveData {
         if (next.dice.locked[die.diceIndex] || next.dice.disabled[die.diceIndex]) {
           return false;
         }
-        const targetValue = jokerKind?.value ?? clickedValue;
+        const targetValue = targetJokerKind?.value ?? clickedValue;
         return die.value === targetValue || isJokerFace(next.dice.types[die.diceIndex], die.value);
       })
       .map((die) => die.diceIndex);

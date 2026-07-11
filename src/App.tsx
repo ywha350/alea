@@ -479,7 +479,15 @@ function App() {
           getJokerCount(state, "hold-em") > 0,
           getJokerCount(state, "odd-choice") > 0,
           state.dice.types,
-          getActiveSeventhValues(state)
+          getActiveSeventhValues(state),
+          {
+            upgrades: state.upgrades,
+            upgradeSourceDice: state.dice.values
+              .map((value, index) => ({ value, index }))
+              .filter((die) => !state.dice.locked[die.index] && !state.dice.disabled[die.index]),
+            diceTypes: state.dice.types,
+            evenLevelBonus: getJokerCount(state, "evenly")
+          }
         )
       : new Set<number>();
   const holdEmSelectionConflict = hasHoldEmSelectionConflict(state);
@@ -1458,9 +1466,6 @@ function App() {
       if (selectedSnakeEyesStarted) {
         triggerEffectiveJokerEffect("snake-eyes");
       }
-      if (selectedMoreDice && getJokerCount(state, "evenly") > 0 && getSelectedValues(next).some((value) => value === 2 || value === 4 || value === 6)) {
-        triggerEffectiveJokerEffect("evenly");
-      }
       if (selectedMoreDice) {
         const previousSeventhUsage = selectionUsesSeventh(state);
         const nextSeventhUsage = selectionUsesSeventh(next);
@@ -2358,7 +2363,6 @@ function App() {
             const dieDeltaPopups = damageDeltaPopups.filter((popup) => popup.dieIndex === index);
             const pressing = diePressPulses.some((pulse) => pulse.dieIndex === index);
             const dieImagePath = getBoardDieImagePath(state, index);
-            const chargedUsed = state.dice.types[index] === "charged" && state.dice.chargedUsed?.[index] === true;
             return (
               <button
                 key={`die-${index}`}
@@ -2379,7 +2383,7 @@ function App() {
                 ) : null}
                 <span
                   className="die-image"
-                  style={dieSpriteStyle(value, dieImagePath, chargedUsed ? 4 : 2, chargedUsed ? 2 : 0)}
+                  style={dieSpriteStyle(value, dieImagePath)}
                   aria-hidden="true"
                 />
                 <span className="die-state">

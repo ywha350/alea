@@ -214,7 +214,7 @@ export const JOKERS: JokerDefinition[] = [
     id: "evenly",
     name: "Evenly",
     type: "Number level",
-    description: "2, 4, and 6 count as +1 level.",
+    description: "Add +1 level to 2, 4, 6.",
     price: 5
   },
   {
